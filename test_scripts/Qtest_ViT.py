@@ -7,62 +7,39 @@ import json
 import logging
 import math
 import os
-import sys
 import warnings
 
-sys.path.append("..")
-sys.path.append(".")
-sys.path.append("/home/xiaoyi/otov2/otov2_auto_structured_pruning/")
-
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms as transforms
+from torch import nn
 
 # from PIL import Image
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
+from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 # from transformers import AutoImageProcessor
-from utils.utils import check_accuracy
-
 from only_train_once import OTO
 from only_train_once.quantization.quant_model import model_to_quantize_model
-from sanity_check.backends.vgg7 import vgg7_bn
-from sanity_check.backends.resnet20_cifar10 import resnet56_cifar10
 from sanity_check.backends.simple_vit import simpleViT_cifar10
-from sanity_check.backends.vision_transformer.vision_transformer import vit_base_patch16_384, vit_small_patch16_224
-
+from sanity_check.backends.vision_transformer.vision_transformer import (
+    vit_base_patch16_384,
+    vit_small_patch16_224,
+)
+from test_scripts.geta_common import (
+    add_common_args,
+    resolve_data_dir,
+    resolve_output_dir,
+)
+from utils.utils import check_accuracy
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
 # Set up logging
 logger = logging.getLogger("new")
-
-
-class StreamingDataset(IterableDataset):
-    def __init__(
-        self, hf_dataset, preprocess_func, length, max_samples_per_epoch=100000
-    ):
-        self.hf_dataset = hf_dataset
-        self.preprocess_func = preprocess_func
-        self.length = length
-        self.max_samples_per_epoch = max_samples_per_epoch
-
-    def __iter__(self):
-        count = 0
-        for example in self.hf_dataset:
-            if self.max_samples_per_epoch and count >= self.max_samples_per_epoch:
-                break
-            yield self.preprocess_func(example)
-            count += 1
-
-    def __len__(self):
-        return self.length
 
 
 def get_quant_param_dict(model):
@@ -115,27 +92,42 @@ def get_bitwidth_dict(param_dict):
     return bit_dict
 
 
-def get_data_loader(dataset: str, batch_size: int, num_workers: int):
-    size = 384 # for VIT TIMM
+def get_data_loader(dataset: str, batch_size: int, num_workers: int, data_dir=None):
+    data_dir = resolve_data_dir(data_dir)
+    size = 384  # for VIT TIMM
     if dataset == "cifar10":
-        transform_train = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.Resize(size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
+        transform_train = transforms.Compose(
+            [
+                transforms.RandomCrop(32, padding=4),
+                transforms.Resize(size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        )
 
-        transform_test = transforms.Compose([
-            transforms.Resize(size),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
+        transform_test = transforms.Compose(
+            [
+                transforms.Resize(size),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+                ),
+            ]
+        )
         trainset = CIFAR10(
-            root="cifar10", train=True, download=True, transform=transform_train
+            root=os.path.join(data_dir, "cifar10"),
+            train=True,
+            download=True,
+            transform=transform_train,
         )
         testset = CIFAR10(
-            root="cifar10", train=False, download=True, transform=transform_test
+            root=os.path.join(data_dir, "cifar10"),
+            train=False,
+            download=True,
+            transform=transform_test,
         )
         input_size = (1, 3, size, size)
         train_loader = DataLoader(
@@ -210,9 +202,16 @@ def main(config):
     seed = config.seed
 
     assert pruning_start_step == projection_start_step + projection_steps
+    output_dir = resolve_output_dir(
+        config.output_dir, f"{model_name}_{variant}_{sparsity_level}"
+    )
+    data_dir = resolve_data_dir(config.data_dir)
     # Logging configuration
     logging.basicConfig(
-        filename=f"./{model_name}_{variant}_{sparsity_level}_{pruning_start_step}.txt",
+        filename=os.path.join(
+            output_dir,
+            f"{model_name}_{variant}_{sparsity_level}_{pruning_start_step}.txt",
+        ),
         filemode="a",
         format="%(message)s",
         level=logging.INFO,
@@ -230,7 +229,7 @@ def main(config):
     logger.info(f"Start pruning step: {pruning_start_step:^3d}")
     logger.info(f"Pruning steps: {pruning_steps:^3d}")
     logger.info(f"Learning rate scheduler steps: {lr_step:^3d}")
-    logger.info(f"=======================================")
+    logger.info("=======================================")
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -239,11 +238,11 @@ def main(config):
         torch.cuda.manual_seed(seed)
 
     train_loader, test_loader, input_size = get_data_loader(
-        dataset, batch_size * num_gpus, num_workers
+        dataset, batch_size * num_gpus, num_workers, data_dir
     )
     # num_classes = 10 if dataset == "cifar10" else 1000
     dummy_input = torch.rand(input_size).to(device)
-        
+
     model = simpleViT_cifar10()
     model = vit_base_patch16_384(pretrained=True, num_classes=1000)
     model = vit_small_patch16_224(pretrained=True, num_classes=1000)
@@ -251,10 +250,7 @@ def main(config):
 
     q_model = model_to_quantize_model(model, num_bits=init_bit)
     oto = OTO(q_model.to(device), dummy_input=dummy_input)
-    oto.mark_unprunable_by_param_names(
-        ['patch_embed.proj.weight',
-            'pos_embed']
-    )
+    oto.mark_unprunable_by_param_names(["patch_embed.proj.weight", "pos_embed"])
     # Add the visualization to make sure that everything quant_act_layers.py works well.
     # oto.visualize(view=False, out_dir='./cache', display_flops=True, display_params=True, display_macs=True)
     # exit()
@@ -278,7 +274,6 @@ def main(config):
         # min_bit_act=min_bit_act,
         # max_bit_act=max_bit_act,
     )
-
 
     # Get full/original floating-point model MACs, BOPs, and number of parameters
     full_macs = oto.compute_macs(in_million=True, layerwise=True)
@@ -308,7 +303,7 @@ def main(config):
         model.train()
         running_loss = 0.0
         for batch_idx, batch in enumerate(
-            tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")
+            tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")
         ):
             if dataset == "imagenet":
                 inputs, targets = batch["pixel_values"], batch["labels"]
@@ -351,10 +346,12 @@ def main(config):
             model.module if num_gpus > 1 else model, test_loader, two_input=False
         )
         avg_wt_bit = oto.compute_average_bit_width()
-        with open("./metrics_info.txt", "a") as f1:
-            f1.write(f"Epoch: {epoch}, loss: {running_loss_avg:5.3f}, norm_all: {opt_metrics.norm_params:5.2f}, grp_sparsity: {opt_metrics.group_sparsity:5.2f}, acc1: {accuracy1:5.2f}%, acc5: {accuracy5:5.2f}%, norm_import: {opt_metrics.norm_important_groups:5.2f}, norm_redund: {opt_metrics.norm_redundant_groups:5.2f}, num_grp_import: {opt_metrics.num_important_groups:5.2f}, num_grp_redund: {opt_metrics.num_redundant_groups:5.2f}, avg_wt_bit_width: {avg_wt_bit:5.2f}")
+        with open(os.path.join(output_dir, "metrics_info.txt"), "a") as f1:
+            f1.write(
+                f"Epoch: {epoch}, loss: {running_loss_avg:5.3f}, norm_all: {opt_metrics.norm_params:5.2f}, grp_sparsity: {opt_metrics.group_sparsity:5.2f}, acc1: {accuracy1:5.2f}%, acc5: {accuracy5:5.2f}%, norm_import: {opt_metrics.norm_important_groups:5.2f}, norm_redund: {opt_metrics.norm_redundant_groups:5.2f}, num_grp_import: {opt_metrics.num_important_groups:5.2f}, num_grp_redund: {opt_metrics.num_redundant_groups:5.2f}, avg_wt_bit_width: {avg_wt_bit:5.2f}"
+            )
             # opt_metrics_epoch = optimizer.compute_metrics()
-         
+
         logger.info(
             f"Epoch: {epoch}, loss: {running_loss_avg:5.3f}, norm_all: {opt_metrics.norm_params:5.2f}, grp_sparsity: {opt_metrics.group_sparsity:5.2f}, acc1: {accuracy1:5.2f}%, acc5: {accuracy5:5.2f}%, norm_import: {opt_metrics.norm_important_groups:5.2f}, norm_redund: {opt_metrics.norm_redundant_groups:5.2f}, num_grp_import: {opt_metrics.num_important_groups:5.2f}, num_grp_redund: {opt_metrics.num_redundant_groups:5.2f}, avg_wt_bit_width: {avg_wt_bit:5.2f}"
         )
@@ -362,7 +359,7 @@ def main(config):
         if accuracy1 > best_acc1:
             best_acc1 = accuracy1
             best_epoch = epoch
-            torch.save(model, "./simpleViT_best_acc1.pt")
+            torch.save(model, os.path.join(output_dir, "simpleViT_best_acc1.pt"))
 
         loss_list.append(running_loss_avg)
 
@@ -370,7 +367,7 @@ def main(config):
     logger.info("Training completed. Constructing subnet...")
 
     # Construct the subnet and get the compressed model
-    oto.construct_subnet(out_dir="./cache")
+    oto.construct_subnet(out_dir=os.path.join(output_dir, "subnet"))
     compressed_model = torch.load(oto.compressed_model_path)
     oto_compressed = OTO(compressed_model, dummy_input)
 
@@ -467,9 +464,7 @@ def get_config():
     parser.add_argument(
         "--epochs", type=int, default=1, help="Number of epochs to train"
     )
-    parser.add_argument(
-        "--lr", type=float, default=1e-3, help="Initial learning rate"
-    )
+    parser.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
     parser.add_argument(
         "--lr_quant", type=float, default=1e-3, help="Initial learning rate"
     )
@@ -527,7 +522,7 @@ def get_config():
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
 
     # Parse arguments
-    config = parser.parse_args()
+    config = add_common_args(parser).parse_args()
 
     return config
 

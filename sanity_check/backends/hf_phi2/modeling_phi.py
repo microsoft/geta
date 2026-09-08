@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import torch
-import torch.nn as nn
 from einops import rearrange, repeat
+from torch import nn
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
+
 from .configuration_phi import PhiConfig
 
 try:
@@ -28,6 +29,7 @@ except:
     FlashRotaryEmbedding = None
     FlashSelfAttention, FlashCrossAttention = None, None
     FusedDense = None
+
 
 @dataclass
 class InferenceParams:
@@ -52,11 +54,13 @@ class InferenceParams:
 
     batch_size_offset: int = field(default=0, metadata={"help": "Batch size offset."})
 
-    key_value_memory_dict: Dict[str, Any] = field(
+    key_value_memory_dict: dict[str, Any] = field(
         default_factory=dict, metadata={"help": "Key value memory dictionary."}
     )
 
-    lengths_per_sample: torch.Tensor = field(default=None, metadata={"help": "Lengths per sample."})
+    lengths_per_sample: torch.Tensor = field(
+        default=None, metadata={"help": "Lengths per sample."}
+    )
 
 
 class PhiEmbedding(nn.Module):
@@ -91,7 +95,10 @@ def _apply_rotary_emb(
     x_pass = x[:, :, :, rotary_dim:]
 
     x1, x2 = x_rot.chunk(2, dim=-1)
-    c, s = rearrange(cos[:seqlen], "s d -> s 1 d"), rearrange(sin[:seqlen], "s d -> s 1 d")
+    c, s = (
+        rearrange(cos[:seqlen], "s d -> s 1 d"),
+        rearrange(sin[:seqlen], "s d -> s 1 d"),
+    )
     x1, x2, c, s = [t.to(dtype=torch.float32) for t in [x1, x2, c, s]]
 
     x_rot = torch.cat([x1 * c - x2 * s, x1 * s + x2 * c], axis=-1).to(x.dtype)
@@ -103,8 +110,8 @@ def _apply_rotary_emb_kv(
     kv: torch.FloatTensor,
     cos: torch.FloatTensor,
     sin: torch.FloatTensor,
-    cos_k: Optional[torch.FloatTensor] = None,
-    sin_k: Optional[torch.FloatTensor] = None,
+    cos_k: torch.FloatTensor | None = None,
+    sin_k: torch.FloatTensor | None = None,
 ) -> torch.FloatTensor:
     _, seqlen, _, _, _ = kv.shape
     _, rotary_dim = cos.shape
@@ -114,7 +121,10 @@ def _apply_rotary_emb_kv(
     k_pass = kv[:, :, 0, :, rotary_dim:]
 
     k1, k2 = k_rot.chunk(2, dim=-1)
-    c, s = rearrange(cos[:seqlen], "s d -> s 1 d"), rearrange(sin[:seqlen], "s d -> s 1 d")
+    c, s = (
+        rearrange(cos[:seqlen], "s d -> s 1 d"),
+        rearrange(sin[:seqlen], "s d -> s 1 d"),
+    )
     k1, k2, c, s = [t.to(dtype=torch.float32) for t in [k1, k2, c, s]]
 
     k_rot = torch.cat([k1 * c - k2 * s, k1 * s + k2 * c], axis=-1).to(kv.dtype)
@@ -132,8 +142,8 @@ def _apply_rotary_emb_qkv(
     qkv: torch.FloatTensor,
     cos: torch.FloatTensor,
     sin: torch.FloatTensor,
-    cos_k: Optional[torch.FloatTensor] = None,
-    sin_k: Optional[torch.FloatTensor] = None,
+    cos_k: torch.FloatTensor | None = None,
+    sin_k: torch.FloatTensor | None = None,
 ) -> torch.FloatTensor:
     _, seqlen, _, _, _ = qkv.shape
     _, rotary_dim = cos.shape
@@ -147,7 +157,10 @@ def _apply_rotary_emb_qkv(
 
     q1, q2 = q_rot.chunk(2, dim=-1)
     k1, k2 = k_rot.chunk(2, dim=-1)
-    c, s = rearrange(cos[:seqlen], "s d -> s 1 d"), rearrange(sin[:seqlen], "s d -> s 1 d")
+    c, s = (
+        rearrange(cos[:seqlen], "s d -> s 1 d"),
+        rearrange(sin[:seqlen], "s d -> s 1 d"),
+    )
     q1, q2, k1, k2, c, s = [t.to(dtype=torch.float32) for t in [q1, q2, k1, k2, c, s]]
 
     q_rot = torch.cat([q1 * c - q2 * s, q1 * s + q2 * c], axis=-1).to(qkv.dtype)
@@ -174,10 +187,10 @@ class RotaryEmbedding(nn.Module):
         self,
         dim: int,
         base: int = 10000,
-        scale_base: Optional[float] = None,
+        scale_base: float | None = None,
         pos_idx_in_fp32: bool = True,
         max_position_embeddings: int = 2048,
-        device: Optional[str] = None,
+        device: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -198,23 +211,32 @@ class RotaryEmbedding(nn.Module):
 
         # Generate and save the scale buffer (non-trainable)
         scale = (
-            (torch.arange(0, dim, 2, device=device, dtype=torch.float32) + 0.4 * dim) / (1.4 * dim)
+            (torch.arange(0, dim, 2, device=device, dtype=torch.float32) + 0.4 * dim)
+            / (1.4 * dim)
             if scale_base is not None
             else None
         )
         self.register_buffer("scale", scale, persistent=False)
 
         # Initialize cached attributes since ONNX can't rely on dynamic initialization
-        self._update_cos_sin_cache(max_position_embeddings, device=device, dtype=torch.float32)
+        self._update_cos_sin_cache(
+            max_position_embeddings, device=device, dtype=torch.float32
+        )
 
-    def _compute_inv_freq(self, device: Optional[str] = None) -> torch.FloatTensor:
-        return 1.0 / (self.base ** (torch.arange(0, self.dim, 2, device=device, dtype=torch.float32) / self.dim))
+    def _compute_inv_freq(self, device: str | None = None) -> torch.FloatTensor:
+        return 1.0 / (
+            self.base
+            ** (
+                torch.arange(0, self.dim, 2, device=device, dtype=torch.float32)
+                / self.dim
+            )
+        )
 
     def _update_cos_sin_cache(
         self,
         seqlen: int,
-        device: Optional[str] = None,
-        dtype: Optional[torch.dtype] = None,
+        device: str | None = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         self._seq_len_cached = seqlen
 
@@ -237,7 +259,8 @@ class RotaryEmbedding(nn.Module):
             self._sin_cached = torch.sin(freqs).to(dtype)
         else:
             power = (
-                torch.arange(seqlen, dtype=self.scale.dtype, device=self.scale.device) - seqlen // 2
+                torch.arange(seqlen, dtype=self.scale.dtype, device=self.scale.device)
+                - seqlen // 2
             ) / self.scale_base
             scale = self.scale.to(device=power.device) ** rearrange(power, "s -> s 1")
 
@@ -250,17 +273,19 @@ class RotaryEmbedding(nn.Module):
     def forward(
         self,
         qkv: torch.Tensor,
-        kv: Optional[torch.Tensor] = None,
+        kv: torch.Tensor | None = None,
         seqlen_offset: int = 0,
         **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if (
             self._seq_len_cached < qkv.shape[1] + seqlen_offset
             or self._cos_cached.device != qkv.device
             or self._cos_cached.dtype != qkv.dtype
             or (self.training and self._cos_cached.is_inference())
         ):
-            self._update_cos_sin_cache(qkv.shape[1] + seqlen_offset, device=qkv.device, dtype=qkv.dtype)
+            self._update_cos_sin_cache(
+                qkv.shape[1] + seqlen_offset, device=qkv.device, dtype=qkv.dtype
+            )
 
         if kv is None:
             return _apply_rotary_emb_qkv(
@@ -293,8 +318,8 @@ class PhiMLP(nn.Module):
     def __init__(
         self,
         config: PretrainedConfig,
-        n_inner: Optional[int] = None,
-        act_fn: Optional[str] = None,
+        n_inner: int | None = None,
+        act_fn: str | None = None,
     ) -> None:
         super().__init__()
 
@@ -324,7 +349,7 @@ class PhiSelfAttention(nn.Module):
     def __init__(
         self,
         causal: bool = True,
-        softmax_scale: Optional[float] = None,
+        softmax_scale: float | None = None,
         attention_dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -339,7 +364,7 @@ class PhiSelfAttention(nn.Module):
         self,
         qkv: torch.FloatTensor,
         causal: bool = None,
-        key_padding_mask: Optional[torch.BoolTensor] = None,
+        key_padding_mask: torch.BoolTensor | None = None,
         **kwargs,
     ) -> torch.FloatTensor:
         batch_size, seqlen = qkv.shape[0], qkv.shape[1]
@@ -356,13 +381,17 @@ class PhiSelfAttention(nn.Module):
         scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
 
         if key_padding_mask is not None:
-            padding_mask = torch.full((batch_size, seqlen), -10000.0, dtype=scores.dtype, device=scores.device)
+            padding_mask = torch.full(
+                (batch_size, seqlen), -10000.0, dtype=scores.dtype, device=scores.device
+            )
             padding_mask.masked_fill_(key_padding_mask, 0.0)
 
             scores = scores + rearrange(padding_mask, "b s -> b 1 1 s")
 
         if causal:
-            causal_mask = torch.triu(torch.full((seqlen, seqlen), -10000.0, device=scores.device), 1)
+            causal_mask = torch.triu(
+                torch.full((seqlen, seqlen), -10000.0, device=scores.device), 1
+            )
             scores = scores + causal_mask.to(dtype=scores.dtype)
 
         attention = torch.softmax(scores, dim=-1).to(v.dtype)
@@ -382,7 +411,7 @@ class PhiCrossAttention(nn.Module):
     def __init__(
         self,
         causal: bool = True,
-        softmax_scale: Optional[float] = None,
+        softmax_scale: float | None = None,
         attention_dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -398,7 +427,7 @@ class PhiCrossAttention(nn.Module):
         q: torch.FloatTensor,
         kv: torch.FloatTensor,
         causal: bool = None,
-        key_padding_mask: Optional[torch.BoolTensor] = None,
+        key_padding_mask: torch.BoolTensor | None = None,
         **kwargs,
     ) -> torch.FloatTensor:
         batch_size, seqlen_q = q.shape[0], q.shape[1]
@@ -430,7 +459,9 @@ class PhiCrossAttention(nn.Module):
             scores = scores + rearrange(padding_mask, "b s -> b 1 1 s")
 
         if causal:
-            rows = rearrange(torch.arange(seqlen_q, device=q.device, dtype=torch.long), "s -> s 1")
+            rows = rearrange(
+                torch.arange(seqlen_q, device=q.device, dtype=torch.long), "s -> s 1"
+            )
             cols = torch.arange(seqlen_k, device=k.device, dtype=torch.long)
             causal_mask = cols > rows + seqlen_k - seqlen_q
 
@@ -446,10 +477,10 @@ class PhiCrossAttention(nn.Module):
 
 def _find_mha_dims(
     config: PretrainedConfig,
-    n_head: Optional[int] = None,
-    n_head_kv: Optional[int] = None,
-    head_dim: Optional[int] = None,
-) -> Tuple[int, int]:
+    n_head: int | None = None,
+    n_head_kv: int | None = None,
+    head_dim: int | None = None,
+) -> tuple[int, int]:
     if n_head is None and head_dim is None:
         head_dim = config.n_embd // config.n_head
         n_head = config.n_head
@@ -462,7 +493,9 @@ def _find_mha_dims(
     return n_head, n_head_kv, head_dim
 
 
-def _update_kv_cache(kv: torch.FloatTensor, inference_params: InferenceParams, layer_idx: int) -> torch.FloatTensor:
+def _update_kv_cache(
+    kv: torch.FloatTensor, inference_params: InferenceParams, layer_idx: int
+) -> torch.FloatTensor:
     num_heads, head_dim = kv.shape[-2:]
 
     if layer_idx not in inference_params.key_value_memory_dict:
@@ -485,11 +518,17 @@ def _update_kv_cache(kv: torch.FloatTensor, inference_params: InferenceParams, l
     # When the current sequence length is equal to or larger than the maximum sequence length,
     # we need to concatenate the current `kv` with the cached `kv` to expand its length
     if sequence_end >= inference_params.max_seqlen:
-        inference_params.key_value_memory_dict[layer_idx] = torch.concatenate((inference_params.key_value_memory_dict[layer_idx], kv), dim=1)
+        inference_params.key_value_memory_dict[layer_idx] = torch.concatenate(
+            (inference_params.key_value_memory_dict[layer_idx], kv), dim=1
+        )
 
-    inference_params.key_value_memory_dict[layer_idx][batch_start:batch_end, sequence_start:sequence_end, ...] = kv
-    kv = inference_params.key_value_memory_dict[layer_idx][batch_start:batch_end, :sequence_end, ...]
-        
+    inference_params.key_value_memory_dict[layer_idx][
+        batch_start:batch_end, sequence_start:sequence_end, ...
+    ] = kv
+    kv = inference_params.key_value_memory_dict[layer_idx][
+        batch_start:batch_end, :sequence_end, ...
+    ]
+
     return kv
 
 
@@ -499,27 +538,31 @@ class PhiMHA(nn.Module):
     def __init__(
         self,
         config: PretrainedConfig,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[str] = None,
-        rotary_dim: Optional[int] = None,
+        dtype: torch.dtype | None = None,
+        device: str | None = None,
+        rotary_dim: int | None = None,
         rotary_base: float = 10000.0,
-        rotary_scale_base: Optional[float] = None,
-        n_head: Optional[int] = None,
-        n_head_kv: Optional[int] = None,
-        head_dim: Optional[int] = None,
+        rotary_scale_base: float | None = None,
+        n_head: int | None = None,
+        n_head_kv: int | None = None,
+        head_dim: int | None = None,
         bias: bool = True,
         causal: bool = True,
-        softmax_scale: Optional[float] = None,
-        layer_idx: Optional[int] = None,
+        softmax_scale: float | None = None,
+        layer_idx: int | None = None,
         return_residual: bool = False,
         checkpointing: bool = False,
     ) -> None:
         super().__init__()
 
         # Rotary embedding
-        self.rotary_dim = rotary_dim if rotary_dim is not None else getattr(config, "rotary_dim", 0)
+        self.rotary_dim = (
+            rotary_dim if rotary_dim is not None else getattr(config, "rotary_dim", 0)
+        )
         if self.rotary_dim > 0:
-            rotary_cls = FlashRotaryEmbedding if config.flash_rotary else RotaryEmbedding
+            rotary_cls = (
+                FlashRotaryEmbedding if config.flash_rotary else RotaryEmbedding
+            )
             if rotary_cls is None:
                 rotary_cls = RotaryEmbedding
 
@@ -541,13 +584,17 @@ class PhiMHA(nn.Module):
         )
         op_size = self.head_dim * (self.n_head + 2 * self.n_head_kv)
         hidden_size = config.n_embd
-        
+
         linear_cls = FusedDense if config.fused_dense else nn.Linear
         if linear_cls is None:
             linear_cls = nn.Linear
 
-        self.Wqkv = linear_cls(hidden_size, op_size, bias=bias, device=device, dtype=dtype)
-        self.out_proj = linear_cls(hidden_size, hidden_size, bias=bias, device=device, dtype=dtype)
+        self.Wqkv = linear_cls(
+            hidden_size, op_size, bias=bias, device=device, dtype=dtype
+        )
+        self.out_proj = linear_cls(
+            hidden_size, hidden_size, bias=bias, device=device, dtype=dtype
+        )
 
         # Attention
         attn_cls = FlashSelfAttention if config.flash_attn else PhiSelfAttention
@@ -575,10 +622,12 @@ class PhiMHA(nn.Module):
         self.checkpointing = checkpointing
 
     def _forward_self_attn(
-        self, x: torch.FloatTensor, key_padding_mask: Optional[torch.BoolTensor]
+        self, x: torch.FloatTensor, key_padding_mask: torch.BoolTensor | None
     ) -> torch.FloatTensor:
         qkv = self.Wqkv(x)
-        qkv = rearrange(qkv, "... (three h d) -> ... three h d", three=3, d=self.head_dim)
+        qkv = rearrange(
+            qkv, "... (three h d) -> ... three h d", three=3, d=self.head_dim
+        )
 
         if self.rotary_dim > 0:
             qkv = self.rotary_emb(qkv)
@@ -590,28 +639,38 @@ class PhiMHA(nn.Module):
             if key_padding_mask is not None:
                 # If `key_padding_mask` is supplied, we need to unpad the input and retrieve
                 # the `cu_seqlens` and `max_seqlen` to be used by `flash-attn`
-                qkv, indices, cu_seqlens, max_seqlen = unpad_input(qkv, key_padding_mask)
+                qkv, indices, cu_seqlens, max_seqlen = unpad_input(
+                    qkv, key_padding_mask
+                )
 
             if self.checkpointing:
                 attn_output = torch.utils.checkpoint.checkpoint(
                     self.inner_attn, qkv, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
                 )
             else:
-                attn_output = self.inner_attn(qkv, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen).to(qkv.device)
+                attn_output = self.inner_attn(
+                    qkv, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
+                ).to(qkv.device)
 
             # If `key_padding_mask` is supplied, we need to pad the output back to the original shape
-            return pad_input(attn_output, indices, batch_size, seqlen) if key_padding_mask is not None else attn_output
+            return (
+                pad_input(attn_output, indices, batch_size, seqlen)
+                if key_padding_mask is not None
+                else attn_output
+            )
 
         if self.checkpointing:
-            return torch.utils.checkpoint.checkpoint(self.inner_attn, qkv, key_padding_mask=key_padding_mask)
+            return torch.utils.checkpoint.checkpoint(
+                self.inner_attn, qkv, key_padding_mask=key_padding_mask
+            )
 
         return self.inner_attn(qkv, key_padding_mask=key_padding_mask)
 
     def _forward_cross_attn(
         self,
         x: torch.FloatTensor,
-        past_key_values: Optional[InferenceParams],
-        key_padding_mask: Optional[torch.BoolTensor],
+        past_key_values: InferenceParams | None,
+        key_padding_mask: torch.BoolTensor | None,
     ) -> torch.FloatTensor:
         batch_size = x.shape[0]
 
@@ -623,7 +682,9 @@ class PhiMHA(nn.Module):
         kv = qkv[..., self.n_head * self.head_dim :]
         kv = rearrange(kv, "... (two hkv d) -> ... two hkv d", two=2, d=self.head_dim)
 
-        seqlen_offset = past_key_values.seqlen_offset if past_key_values is not None else 0
+        seqlen_offset = (
+            past_key_values.seqlen_offset if past_key_values is not None else 0
+        )
         causal = None if seqlen_offset == 0 else False
         if self.rotary_dim > 0:
             q, kv = self.rotary_emb(q, kv=kv, seqlen_offset=seqlen_offset)
@@ -649,7 +710,9 @@ class PhiMHA(nn.Module):
                 elif seqlen_q != seqlen_k:
                     key_padding_mask = key_padding_mask[:, -seqlen_q:]
 
-                q, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(q, key_padding_mask)
+                q, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(
+                    q, key_padding_mask
+                )
 
             if self.checkpointing:
                 attn_output = torch.utils.checkpoint.checkpoint(
@@ -688,15 +751,17 @@ class PhiMHA(nn.Module):
                 causal=causal,
             )
 
-        return self.inner_cross_attn(q, kv, key_padding_mask=key_padding_mask, causal=causal)
+        return self.inner_cross_attn(
+            q, kv, key_padding_mask=key_padding_mask, causal=causal
+        )
 
     def forward(
         self,
         x: torch.FloatTensor,
-        past_key_values: Optional[InferenceParams] = None,
-        attention_mask: Optional[Union[torch.LongTensor, torch.BoolTensor]] = None,
+        past_key_values: InferenceParams | None = None,
+        attention_mask: torch.LongTensor | torch.BoolTensor | None = None,
         **kwargs,
-    ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+    ) -> tuple[torch.FloatTensor, torch.FloatTensor]:
         if attention_mask is not None:
             attention_mask = attention_mask.bool()
         else:
@@ -710,7 +775,9 @@ class PhiMHA(nn.Module):
             else:
                 # If `past_key_values` are supplied, it means that we might have cached values and
                 # could take advantage of cross-attention
-                attn_output = self._forward_cross_attn(x, past_key_values, attention_mask)
+                attn_output = self._forward_cross_attn(
+                    x, past_key_values, attention_mask
+                )
         # MQA / GQA
         else:
             # Regardless of `past_key_values` being supplied or not, it always use cross-attention
@@ -731,7 +798,7 @@ class ParallelBlock(nn.Module):
     def __init__(
         self,
         config: PretrainedConfig,
-        block_idx: Optional[int] = None,
+        block_idx: int | None = None,
     ) -> None:
         super().__init__()
 
@@ -745,8 +812,8 @@ class ParallelBlock(nn.Module):
     def forward(
         self,
         hidden_states: torch.FloatTensor,
-        past_key_values: Optional[Union[torch.FloatTensor, InferenceParams]] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        past_key_values: torch.FloatTensor | InferenceParams | None = None,
+        attention_mask: torch.BoolTensor | None = None,
         **kwargs,
     ) -> torch.FloatTensor:
         residual = hidden_states
@@ -801,7 +868,9 @@ class CausalLMLoss(nn.Module):
         self.shift_labels = shift_labels
         self.loss_fct = nn.CrossEntropyLoss()
 
-    def forward(self, logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
+    def forward(
+        self, logits: torch.FloatTensor, labels: torch.LongTensor
+    ) -> torch.FloatTensor:
         if self.shift_labels:
             logits = logits[..., :-1, :].contiguous()
             labels = labels[..., 1:].contiguous()
@@ -839,11 +908,13 @@ class PhiPreTrainedModel(PreTrainedModel):
     def prepare_inputs_for_generation(
         self,
         input_ids: torch.LongTensor,
-        past_key_values: Optional[Union[torch.FloatTensor, InferenceParams]] = None,
-        attention_mask: Optional[Union[torch.LongTensor, torch.BoolTensor]] = None,
+        past_key_values: torch.FloatTensor | InferenceParams | None = None,
+        attention_mask: torch.LongTensor | torch.BoolTensor | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
-        if past_key_values is None or not (isinstance(past_key_values, InferenceParams)):
+    ) -> dict[str, Any]:
+        if past_key_values is None or not (
+            isinstance(past_key_values, InferenceParams)
+        ):
             past_key_values = InferenceParams(
                 max_seqlen=self.config.n_positions,
                 max_batch_size=input_ids.shape[0],
@@ -874,7 +945,9 @@ class PhiModel(PhiPreTrainedModel):
         super().__init__(config)
 
         self.embd = PhiEmbedding(config)
-        self.h = nn.ModuleList([ParallelBlock(config, block_idx=i) for i in range(config.n_layer)])
+        self.h = nn.ModuleList(
+            [ParallelBlock(config, block_idx=i) for i in range(config.n_layer)]
+        )
         self.gradient_checkpointing = False
         self.post_init()
 
@@ -887,8 +960,8 @@ class PhiModel(PhiPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor,
-        past_key_values: Optional[Union[torch.FloatTensor, InferenceParams]] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        past_key_values: torch.FloatTensor | InferenceParams | None = None,
+        attention_mask: torch.BoolTensor | None = None,
     ) -> torch.FloatTensor:
         hidden_states = self.embd(input_ids)
 
@@ -906,7 +979,9 @@ class PhiForCausalLM(PhiPreTrainedModel):
     """Phi for Causal Language Modeling."""
 
     _keys_to_ignore_on_load_missing = [""]
-    _keys_to_ignore_on_load_unexpected = [r"transformer\.h\.\d+\.mlp.(fc_in|fc_out)\.(weight|bias)"]
+    _keys_to_ignore_on_load_unexpected = [
+        r"transformer\.h\.\d+\.mlp.(fc_in|fc_out)\.(weight|bias)"
+    ]
 
     def __init__(self, config: PhiConfig) -> None:
         super().__init__(config)
@@ -926,16 +1001,20 @@ class PhiForCausalLM(PhiPreTrainedModel):
     def forward(
         self,
         input_ids: torch.LongTensor,
-        past_key_values: Optional[Union[torch.FloatTensor, InferenceParams]] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
+        past_key_values: torch.FloatTensor | InferenceParams | None = None,
+        attention_mask: torch.BoolTensor | None = None,
+        labels: torch.LongTensor | None = None,
         **kwargs,
     ) -> CausalLMOutputWithPast:
-        hidden_states = self.transformer(input_ids, past_key_values=past_key_values, attention_mask=attention_mask)
+        hidden_states = self.transformer(
+            input_ids, past_key_values=past_key_values, attention_mask=attention_mask
+        )
         lm_logits = self.lm_head(hidden_states)
 
         loss = None
         if labels is not None:
             loss = self.loss(lm_logits, labels)
 
-        return CausalLMOutputWithPast(loss=loss, logits=lm_logits, past_key_values=past_key_values)
+        return CausalLMOutputWithPast(
+            loss=loss, logits=lm_logits, past_key_values=past_key_values
+        )

@@ -1,31 +1,30 @@
 import logging
 import math
 import os
-import sys
 
-sys.path.append("..")
-sys.path.append(".")
-sys.path.append("/home/davidaponte/otov2_auto_structured_pruning/")
-
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
-import torchvision.transforms as transforms
 import typer
 from datasets import load_dataset
 from PIL import Image
-from torch.utils.data import DataLoader, IterableDataset
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 from transformers import AutoImageProcessor
-from utils.utils import check_accuracy
 
 from only_train_once import OTO
 from only_train_once.quantization.quant_model import model_to_quantize_model
 from sanity_check.backends.resnet20_cifar10 import resnet20_cifar10
 from sanity_check.backends.resnet_cifar10 import resnet18_cifar10
 from sanity_check.backends.vgg7 import vgg7_bn
+from test_scripts.geta_common import (
+    StreamingDataset,
+    resolve_data_dir,
+    resolve_output_dir,
+)
+from utils.utils import check_accuracy
 
 # Set up logging
 logging.basicConfig(
@@ -34,27 +33,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = typer.Typer()
-
-
-class StreamingDataset(IterableDataset):
-    def __init__(
-        self, hf_dataset, preprocess_func, length, max_samples_per_epoch=100000
-    ):
-        self.hf_dataset = hf_dataset
-        self.preprocess_func = preprocess_func
-        self.length = length
-        self.max_samples_per_epoch = max_samples_per_epoch
-
-    def __iter__(self):
-        count = 0
-        for example in self.hf_dataset:
-            if self.max_samples_per_epoch and count >= self.max_samples_per_epoch:
-                break
-            yield self.preprocess_func(example)
-            count += 1
-
-    def __len__(self):
-        return self.length
 
 
 def get_quant_param_dict(model):
@@ -229,7 +207,8 @@ def compute_bop_compression_ratio(
     return bop_compression_ratio, total_original_mac, total_compressed_mac
 
 
-def get_data_loader(dataset: str, batch_size: int, num_workers: int):
+def get_data_loader(dataset: str, batch_size: int, num_workers: int, data_dir=None):
+    data_dir = resolve_data_dir(data_dir)
     if dataset == "cifar10":
         transform_train = transforms.Compose(
             [
@@ -250,10 +229,16 @@ def get_data_loader(dataset: str, batch_size: int, num_workers: int):
             ]
         )
         trainset = CIFAR10(
-            root="cifar10", train=True, download=True, transform=transform_train
+            root=os.path.join(resolve_data_dir(data_dir), "cifar10"),
+            train=True,
+            download=True,
+            transform=transform_train,
         )
         testset = CIFAR10(
-            root="cifar10", train=False, download=True, transform=transform_test
+            root=os.path.join(resolve_data_dir(data_dir), "cifar10"),
+            train=False,
+            download=True,
+            transform=transform_test,
         )
         input_size = (1, 3, 32, 32)
         train_loader = DataLoader(
@@ -320,8 +305,12 @@ def main(
     variant: str = typer.Option("sgd", help="Optimizer variant"),
     seed: int = typer.Option(1, help="Random seed"),
     output_dir: str = typer.Option(
-        "/home/davidaponte/otov2_auto_structured_pruning/tutorials",
-        help="Output directory for models",
+        None,
+        help="Output directory for models (default: <repo>/outputs/<dataset>_<model_name>)",
+    ),
+    data_dir: str = typer.Option(
+        None,
+        help="Data directory (default: <repo>/data or $GETA_DATA_DIR)",
     ),
 ):
     torch.manual_seed(seed)
@@ -329,10 +318,10 @@ def main(
     num_gpus = torch.cuda.device_count()
     if device.type == "cuda":
         torch.cuda.manual_seed(seed)
-    output_dir = f"{output_dir}/{dataset}_{model_name}"
+    output_dir = resolve_output_dir(output_dir, f"{dataset}_{model_name}")
 
     train_loader, test_loader, input_size = get_data_loader(
-        dataset, batch_size * num_gpus, num_workers
+        dataset, batch_size * num_gpus, num_workers, data_dir
     )
     num_classes = 10 if dataset == "cifar10" else 1000
     dummy_input = torch.rand(input_size).to(device)
@@ -375,7 +364,7 @@ def main(
         model.train()
         running_loss = 0.0
         for batch_idx, batch in enumerate(
-            tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")
+            tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")
         ):
             if dataset == "imagenet":
                 inputs, targets = batch["pixel_values"], batch["labels"]

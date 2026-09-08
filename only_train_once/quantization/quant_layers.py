@@ -1,10 +1,10 @@
 import logging
 import math
 from enum import Enum
-from typing import Tuple, Union
+from typing import Union
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class NanInGradientError(Exception):
@@ -69,7 +69,7 @@ class SymQuantizerNonLinear(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output) -> Tuple[torch.Tensor]:
+    def backward(ctx, grad_output) -> tuple[torch.Tensor]:
         input, d_quant, q_m, t_quant, clip_val, q_s = ctx.saved_tensors
         device = input.device
         input_abs = torch.abs(input)
@@ -161,7 +161,7 @@ class SymQuantizerLinear(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output) -> Tuple[torch.Tensor]:
+    def backward(ctx, grad_output) -> tuple[torch.Tensor]:
         input, d_quant, q_m, clip_val, q_s = ctx.saved_tensors
         device = input.device
         input_abs = torch.abs(input)
@@ -204,15 +204,16 @@ class SymQuantizerLinear(torch.autograd.Function):
             raise NanInGradientError(error_message)
         return grad_x, grad_d, grad_qm, None, None
 
+
 # NOTE: this is a experimental WIP, not used in the codebase yet
 class DGEQuantizer(torch.autograd.Function):
     """DGE quantizer for weights that replaces STE with differentiable gradient estimation.
     https://arxiv.org/pdf/2501.17116
-    Forward: Normal quantization 
+    Forward: Normal quantization
     Backward: Uses f'(x) = (1/k) · |x - δ/2|^(1/k - 1) for weight gradient computation
     where k scales based on bit width relative to paper's k=5 for 4-bit.
     """
-    
+
     @staticmethod
     def forward(
         ctx,
@@ -225,15 +226,15 @@ class DGEQuantizer(torch.autograd.Function):
     ) -> torch.Tensor:
         device = input.device
         input_abs = torch.abs(input)
-        
+
         # Move tensors to device
         d_quant = d_quant.to(device)
         q_m = q_m.to(device)
         clip_val = clip_val.to(device)
         q_s = q_s.to(device)
-        
+
         # Scale k relative to paper's k=5 for 4-bit
-        k = torch.tensor(5.0 * (4.0/num_bits)).to(device)
+        k = torch.tensor(5.0 * (4.0 / num_bits)).to(device)
         ctx.save_for_backward(input, d_quant, q_m, k, clip_val, q_s)
 
         range_pow = torch.abs(q_m - q_s)
@@ -246,7 +247,7 @@ class DGEQuantizer(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, grad_output) -> Tuple[torch.Tensor]:
+    def backward(ctx, grad_output) -> tuple[torch.Tensor]:
         input, d_quant, q_m, k, clip_val, q_s = ctx.saved_tensors
         device = input.device
         input_abs = torch.abs(input)
@@ -257,18 +258,20 @@ class DGEQuantizer(torch.autograd.Function):
         grad_x[input.le(clip_val[0])] = 0
 
         # Paper's DGE gradient computation: f'(x) = (1/k) · |x - δ/2|^(1/k - 1)
-        x_centered = input - d_quant/2
-        grad_scale = (1/k) * torch.pow(torch.abs(x_centered), 1/k - 1)
+        x_centered = input - d_quant / 2
+        grad_scale = (1 / k) * torch.pow(torch.abs(x_centered), 1 / k - 1)
         grad_x = grad_x * grad_scale
         # TODO: do we modify if we have higher than 4 bits?
         # Cap gradient magnitude at 3.0 as in paper
-        grad_x = torch.clamp(grad_x, -3.0, 3.0) 
+        grad_x = torch.clamp(grad_x, -3.0, 3.0)
 
         # Compute d_quant gradient
         range_pow = torch.abs(q_m - q_s)
         input_pow = input_abs - q_s
         grad_d_xq = torch.round(input_pow.div(d_quant)) - input_pow.div(d_quant)
-        grad_d_xq[input_abs >= q_m] = torch.round(range_pow.div(d_quant)) - range_pow.div(d_quant)
+        grad_d_xq[input_abs >= q_m] = torch.round(
+            range_pow.div(d_quant)
+        ) - range_pow.div(d_quant)
         grad_d_xq[input_abs <= q_s] = 0
         grad_d_xq = torch.sign(input) * grad_d_xq
         grad_d = torch.tensor([torch.sum(grad_output * grad_d_xq)], device=device)
@@ -289,6 +292,7 @@ class DGEQuantizer(torch.autograd.Function):
 
         return grad_x, grad_d, grad_qm, None, None, None
 
+
 def _get_quantizer(qtype: QuantizationType) -> torch.autograd.Function:
     if qtype == QuantizationType.SYMMETRIC_LINEAR:
         return SymQuantizerLinear
@@ -308,8 +312,8 @@ class QuantizeMixin:
         q_m_init: float = 1.0,
         quant_type: QuantizationType = QuantizationType.SYMMETRIC_LINEAR,
         quant_mode: QuantizationMode = QuantizationMode.WEIGHT_ONLY,
-        weight_clip_val: Tuple[float, float] = (-2.0, 2.0),
-        act_clip_val: Tuple[float, float] = (-2.0, 2.0),
+        weight_clip_val: tuple[float, float] = (-2.0, 2.0),
+        act_clip_val: tuple[float, float] = (-2.0, 2.0),
     ):
         # Initialize weight quantization parameters
         self.d_quant_wt = nn.Parameter(torch.tensor([d_quant_init]))

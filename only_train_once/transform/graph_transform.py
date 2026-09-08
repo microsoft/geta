@@ -1,18 +1,21 @@
 # import imp
 import re
+
 from . import ge
+
 # from only_train_once.operation import Operator
 # from only_train_once.graph import Node
 
-class Rename():
+
+class Rename:
     def __init__(self, op=None, name=None, to=None):
         assert op or name, "Either op or name must be provided"
-        assert not(op and name), "Either op or name should be provided, but not both"
-        assert bool(to), "The to parameter is required" 
+        assert not (op and name), "Either op or name should be provided, but not both"
+        assert bool(to), "The to parameter is required"
         self.to = to
         self.op = re.compile(op) if op else None
         self.name = re.compile(name) if name else None
-    
+
     def apply(self, graph):
         for i, node in enumerate(graph.nodes.values()):
             if self.op:
@@ -22,14 +25,15 @@ class Rename():
             else:
                 node.op_name = self.name.sub(self.to, node.op_name)
 
-class Fold():
+
+class Fold:
     def __init__(self, pattern, to, name=None):
         # TODO: validate that op and name are valid
         self.pattern = ge.GEParser(pattern).parse()
         self.to = to
         self.name = name
 
-    def apply(self, graph):     
+    def apply(self, graph):
         while True:
             matches, _ = graph.search(self.pattern)
             if not matches:
@@ -53,12 +57,15 @@ class Fold():
                 for i in range(1, len(matches)):
                     combo_op += matches[i].op
                 combo_op.name = self.to or self.pattern
-                combo = Node(id=graph.sequence_id(),
-                             op=combo_op,
-                             output_shape=matches[-1].output_shape,
-                             outputs = list(outputs)) # TODO, check bugs
+                combo = Node(
+                    id=graph.sequence_id(),
+                    op=combo_op,
+                    output_shape=matches[-1].output_shape,
+                    outputs=list(outputs),
+                )  # TODO, check bugs
                 combo._caption = "/".join(filter(None, [l.caption for l in matches]))
             graph.replace(matches, combo)
+
 
 # class FoldPixelUnShuffle():
 #     def __init__(self, pattern, to, name=None):
@@ -80,18 +87,19 @@ class Fold():
 #             reshape_first_node = matches[1]
 #             conv_second_node = matches[4]
 #             upscale_ratio = conv_second_node.input_shape[1] // reshape_first_node.input_shape[1]
-#             if upscale_ratio > 1:    
+#             if upscale_ratio > 1:
 #                 op = Operator(_type=self.to, cfg_params={'upscale_ratio': upscale_ratio})
 #                 # node = Node(id=, op_name=self.to, op=op, inputs=inputs, outputs=outputs, output_shape=output_shape)
 #                 # graph.replace(matches, combo)
 
-class ConvBNFuse():
+
+class ConvBNFuse:
     def __init__(self, pattern, to, name=None):
         self.pattern = ge.GEParser(pattern).parse()
         self.to = to
         self.name = name
 
-    def apply(self, graph):     
+    def apply(self, graph):
         graph.fused_conv_bns = list()
         while True:
             matches, _ = graph.search(self.pattern)
@@ -100,6 +108,7 @@ class ConvBNFuse():
             for match_node in matches:
                 match_node._skip_pattern_search = True
             graph.fused_conv_bns.append(matches)
+
 
 # PyTorch Graph Transforms
 FRAMEWORK_TRANSFORMS = [

@@ -2,7 +2,6 @@
 # Licensed under the MIT license.
 
 import math
-from typing import Optional
 
 from transformers import PretrainedConfig
 
@@ -24,11 +23,11 @@ class PhiConfig(PretrainedConfig):
         n_positions: int = 2048,
         n_embd: int = 2560,
         n_layer: int = 32,
-        n_inner: Optional[int] = None,
+        n_inner: int | None = None,
         n_head: int = 32,
-        n_head_kv: Optional[int] = 32,
-        rotary_dim: Optional[int] = 32,
-        activation_function: Optional[str] = "gelu_new",
+        n_head_kv: int | None = 32,
+        rotary_dim: int | None = 32,
+        activation_function: str | None = "gelu_new",
         flash_attn: bool = False,
         flash_rotary: bool = False,
         fused_dense: bool = False,
@@ -39,9 +38,11 @@ class PhiConfig(PretrainedConfig):
         initializer_range: float = 0.02,
         tie_word_embeddings: bool = False,
         pad_vocab_size_multiple: int = 64,
-        **kwargs
+        **kwargs,
     ) -> None:
-        self.vocab_size = int(math.ceil(vocab_size / pad_vocab_size_multiple) * pad_vocab_size_multiple)
+        self.vocab_size = int(
+            math.ceil(vocab_size / pad_vocab_size_multiple) * pad_vocab_size_multiple
+        )
         self.n_positions = n_positions
         self.n_embd = n_embd
         self.n_layer = n_layer

@@ -1,10 +1,13 @@
-import torch
-from only_train_once import OTO
-from backends import DiffModelCIFAR
-import unittest
 import os
+import unittest
 
-OUT_DIR = './cache'
+import torch
+from backends import DiffModelCIFAR
+
+from only_train_once import OTO
+
+OUT_DIR = "./cache"
+
 
 class TestDiffModelCIFAR(unittest.TestCase):
     def test_sanity(self, dummy_input=torch.rand(1, 4, 32, 32)):
@@ -15,7 +18,7 @@ class TestDiffModelCIFAR(unittest.TestCase):
         oto.random_set_zero_groups(target_group_sparsity=0.5)
 
         oto.construct_subnet(out_dir=OUT_DIR)
-    
+
         full_model = torch.load(oto.full_group_sparse_model_path)
         compressed_model = torch.load(oto.compressed_model_path)
 
@@ -27,5 +30,9 @@ class TestDiffModelCIFAR(unittest.TestCase):
         # self.assertLessEqual(max_output_diff, 1e-2)
         full_model_size = os.stat(oto.full_group_sparse_model_path)
         compressed_model_size = os.stat(oto.compressed_model_path)
-        print("Size of full model     : ", full_model_size.st_size / (1024 ** 3), "GBs")
-        print("Size of compress model : ", compressed_model_size.st_size / (1024 ** 3), "GBs")
+        print("Size of full model     : ", full_model_size.st_size / (1024**3), "GBs")
+        print(
+            "Size of compress model : ",
+            compressed_model_size.st_size / (1024**3),
+            "GBs",
+        )

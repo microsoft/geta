@@ -1,9 +1,8 @@
-from dataclasses import dataclass, fields, asdict
 import json
+from dataclasses import asdict, dataclass, fields
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
 
 from .mamba_onnx import Mamba, MambaConfig, RMSNorm
 
@@ -14,6 +13,7 @@ Encapsulates a Mamba model as language model. It has an embedding layer, and a L
 # TODO generate function : batch size != 1 ? (for now B=1)
 # TODO generate function : top-p sampling
 
+
 @dataclass
 class MambaLMConfig(MambaConfig):
     vocab_size: int = 32000
@@ -23,14 +23,20 @@ class MambaLMConfig(MambaConfig):
         super().__post_init__()
 
         if self.vocab_size % self.pad_vocab_size_multiple != 0:
-            self.vocab_size += (self.pad_vocab_size_multiple - self.vocab_size % self.pad_vocab_size_multiple)
+            self.vocab_size += (
+                self.pad_vocab_size_multiple
+                - self.vocab_size % self.pad_vocab_size_multiple
+            )
 
     def to_mamba_config(self) -> MambaConfig:
         mamba_config_fields = {field.name for field in fields(MambaConfig)}
-        filtered_dict = {k: v for k, v in asdict(self).items() if k in mamba_config_fields}
+        filtered_dict = {
+            k: v for k, v in asdict(self).items() if k in mamba_config_fields
+        }
         return MambaConfig(**filtered_dict)
 
-# adapted from https://github.com/johnma2006/mamba-minimal
+
+# adapted from https://github.com/johnma2006/mamba-minimal
 def from_pretrained(name: str):
     """
     Returns a model loaded with pretrained weights pulled from HuggingFace.
@@ -49,40 +55,51 @@ def from_pretrained(name: str):
             * 'state-spaces/mamba-130m'
     Returns:
         model: a Mamba model configured with the proper parameters and initialized with the proper weights
-    """   
+    """
 
-    from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
+    from transformers.utils import CONFIG_NAME, WEIGHTS_NAME
     from transformers.utils.hub import cached_file
 
     def load_config_hf(model_name):
-        resolved_archive_file = cached_file(model_name, CONFIG_NAME, _raise_exceptions_for_missing_entries=False)
+        resolved_archive_file = cached_file(
+            model_name, CONFIG_NAME, _raise_exceptions_for_missing_entries=False
+        )
         return json.load(open(resolved_archive_file))
 
     def load_state_dict_hf(model_name):
-        resolved_archive_file = cached_file(model_name, WEIGHTS_NAME, _raise_exceptions_for_missing_entries=False)
-        return torch.load(resolved_archive_file, weights_only=True, map_location='cpu', mmap=True)
+        resolved_archive_file = cached_file(
+            model_name, WEIGHTS_NAME, _raise_exceptions_for_missing_entries=False
+        )
+        return torch.load(
+            resolved_archive_file, weights_only=True, map_location="cpu", mmap=True
+        )
 
-    # copy config data
+    # copy config data
     config_data = load_config_hf(name)
-    config = MambaLMConfig(d_model=config_data['d_model'], n_layers=config_data['n_layer'], vocab_size=config_data['vocab_size'])
+    config = MambaLMConfig(
+        d_model=config_data["d_model"],
+        n_layers=config_data["n_layer"],
+        vocab_size=config_data["vocab_size"],
+    )
 
     model = MambaLM(config)
 
-    # copy weights
+    # copy weights
     state_dict = load_state_dict_hf(name)
 
     new_state_dict = {}
     for key in state_dict:
-        if key == 'backbone.embedding.weight' or key == 'backbone.norm_f.weight':
-            new_key = key.replace('backbone.', '')
+        if key == "backbone.embedding.weight" or key == "backbone.norm_f.weight":
+            new_key = key.replace("backbone.", "")
         else:
-            new_key = key.replace('backbone', 'mamba')
+            new_key = key.replace("backbone", "mamba")
 
         new_state_dict[new_key] = state_dict[key]
 
     model.load_state_dict(new_state_dict)
 
-    return model #, config
+    return model  # , config
+
 
 class MambaLM(nn.Module):
     def __init__(self, lm_config: MambaLMConfig):
@@ -94,27 +111,48 @@ class MambaLM(nn.Module):
         self.mamba = Mamba(self.config)
         self.norm_f = RMSNorm(self.config.d_model)
 
-        self.lm_head = nn.Linear(self.config.d_model, self.lm_config.vocab_size, bias=False)
-        self.lm_head.weight = self.embedding.weight # weight sharing
+        self.lm_head = nn.Linear(
+            self.config.d_model, self.lm_config.vocab_size, bias=False
+        )
+        self.lm_head.weight = self.embedding.weight  # weight sharing
 
     def init_caches(self):
         # hs will be initialized to zeros, so do inputs
-        hs = torch.zeros(self.config.n_layers, 1, self.config.d_inner, self.config.d_state, device=next(self.parameters()).device)
+        hs = torch.zeros(
+            self.config.n_layers,
+            1,
+            self.config.d_inner,
+            self.config.d_state,
+            device=next(self.parameters()).device,
+        )
         # inputs size would be like this
-        inputs = torch.zeros(self.config.n_layers, 1, self.config.d_inner, self.config.d_conv-1, device=next(self.parameters()).device)
+        inputs = torch.zeros(
+            self.config.n_layers,
+            1,
+            self.config.d_inner,
+            self.config.d_conv - 1,
+            device=next(self.parameters()).device,
+        )
 
         return hs, inputs
 
     def forward(self, token, hs, inputs):
-        # token : (B)
-        # caches : [cache(layer) for all layers], cache : (h, inputs)
+        # token : (B)
+        # caches : [cache(layer) for all layers], cache : (h, inputs)
 
-        # logits : (B, vocab_size)
-        # caches : [cache(layer) for all layers], cache : (h, inputs)
+        # logits : (B, vocab_size)
+        # caches : [cache(layer) for all layers], cache : (h, inputs)
 
         print(len(token), token)
         x = self.embedding(token)
-        print("line 117 x.shape:", x.shape, "hs.shape: ", hs.shape, "inputs.shape: ", inputs.shape)
+        print(
+            "line 117 x.shape:",
+            x.shape,
+            "hs.shape: ",
+            hs.shape,
+            "inputs.shape: ",
+            inputs.shape,
+        )
 
         x, hs, inputs = self.mamba.step(x, hs, inputs)
         x = self.norm_f(x)

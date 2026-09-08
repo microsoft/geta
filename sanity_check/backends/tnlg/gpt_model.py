@@ -1,4 +1,3 @@
-
 """Compontents for GPT-style language models.
 
 This module defines the TransformerLayer, Transformer, and LanguageModel classes
@@ -20,16 +19,18 @@ RMSNorm.
 The classes are implemented as PyTorch nn.Module subclasses, and can be used for
 training and inference on language modeling tasks.
 """
+
+import torch
+from torch import nn
+
 from .gpt_components import (
-    SelfAttention,
     ProjLayer,
-    rotary_mat,
     ProjLayerSiluMatMul,
     RMSNorm,
+    SelfAttention,
+    rotary_mat,
 )
-import torch.nn as nn
-import torch
-from typing import Union, Tuple
+
 
 class TransformerLayer(nn.Module):
     """
@@ -57,7 +58,7 @@ class TransformerLayer(nn.Module):
         hidden_size: int,
         n_heads: int,
         scale_type: str,
-        device: Union[torch.device, None] = None,
+        device: torch.device | None = None,
         use_biases: bool = True,
         interleaved: bool = False,
         model_type: str = "TNLG",
@@ -110,8 +111,7 @@ class TransformerLayer(nn.Module):
             proj_dim = hidden_size * 4
             proj_dim = int(2 * proj_dim / 3)
             proj_dim = 256 * ((proj_dim + 256 - 1) // 256)
-            self.proj = \
-                ProjLayerSiluMatMul(hidden_size, proj_dim, device=device)
+            self.proj = ProjLayerSiluMatMul(hidden_size, proj_dim, device=device)
         else:
             self.proj = ProjLayer(hidden_size, device=device)
 
@@ -164,14 +164,7 @@ class TransformerLayer(nn.Module):
         # Dimension of x is [batch_size, seq_len, hidden_size] Dimension of
         # k_cache and v_cache is [batch_size, n_layers, pos, n_heads, head_dim]
         h, k_out, v_out = self.attention(
-            self.attn_norm(x),
-            attn_mask,
-            cos,
-            sin,
-            k_cache,
-            v_cache,
-            pos,
-            layer_id
+            self.attn_norm(x), attn_mask, cos, sin, k_cache, v_cache, pos, layer_id
         )
 
         if self.model_type == "TNLG" or self.model_type == "Llama":
@@ -239,11 +232,7 @@ class Transformer(nn.Module):
         super().__init__()
 
         cos, sin = rotary_mat(
-            hidden_size,
-            n_heads,
-            max_seq_len,
-            head_scale=head_scale,
-            device=device
+            hidden_size, n_heads, max_seq_len, head_scale=head_scale, device=device
         )
         self.register_buffer("cos", cos.to(device), persistent=False)
         self.register_buffer("sin", sin.to(device), persistent=False)
@@ -306,23 +295,17 @@ class Transformer(nn.Module):
 
         for block_idx, block in enumerate(self.block_list):
             x, k_out, v_out = block(
-                x,
-                attn_mask,
-                self.cos,
-                self.sin,
-                k_cache,
-                v_cache,
-                pos,
-                block_idx
+                x, attn_mask, self.cos, self.sin, k_cache, v_cache, pos, block_idx
             )
 
             k_list.append(k_out)
             v_list.append(v_out)
 
         x = self.layer_norm(x)
-        
+
         # return x, torch.stack(k_list, dim=1), torch.stack(v_list, dim=1)
         return x, k_list, v_list
+
 
 class LanguageModel(nn.Module):
     """
@@ -448,9 +431,7 @@ class LanguageModel(nn.Module):
             return self.logits_layer.weight
 
         assert self.embedding_layer is not None
-        if self.model_type == "Llama":
-            return self.embedding_layer.weight
-        elif self.model_type == "Dolly":
+        if self.model_type == "Llama" or self.model_type == "Dolly":
             return self.embedding_layer.weight
         else:
             raise ValueError("model_type must be either TNLG or Llama")
@@ -498,6 +479,7 @@ class LanguageModel(nn.Module):
 
         # return self.logits, k_out, v_out
 
+
 class TNLG(nn.Module):
     def __init__(
         self,
@@ -533,42 +515,73 @@ class TNLG(nn.Module):
             hidden_size, vocab_size, bias=False, device=device
         )
 
-        self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device = seq_len, n_layers, n_heads, hidden_size, device
+        self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device = (
+            seq_len,
+            n_layers,
+            n_heads,
+            hidden_size,
+            device,
+        )
         self.head_dim = int(hidden_size / n_heads)
-        
+
     def generate(self, input_ids, eod, max_length, generation_scale=10.0):
-        max_seq_len, n_layers, n_heads, hidden_size, device = self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device
+        max_seq_len, n_layers, n_heads, hidden_size, device = (
+            self.max_seq_len,
+            self.n_layers,
+            self.n_heads,
+            self.hidden_size,
+            self.device,
+        )
 
         tokens = input_ids.to(device)
-        x = torch.nn.functional.embedding(tokens, self.get_input_embeddings(), None, None, 2.0, False, False).unsqueeze(0) * generation_scale
+        x = (
+            torch.nn.functional.embedding(
+                tokens, self.get_input_embeddings(), None, None, 2.0, False, False
+            ).unsqueeze(0)
+            * generation_scale
+        )
         attn_mask = -10000.0 * torch.triu(
             torch.ones(x.shape[0], max_seq_len, max_seq_len), diagonal=1
         ).to(device)
 
         head_dim = int(hidden_size / n_heads)
         k_cache = torch.zeros(
-            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)
+            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+        ).to(device)
         v_cache = torch.zeros(
-            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)
+            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+        ).to(device)
 
         pos = 0
         output_tokens = []
         for idx in range(max_length):
-            logits, k_out, v_out = self.forward(x, attn_mask, k_cache[:, :, :pos], v_cache[:, :, :pos], pos)
+            logits, k_out, v_out = self.forward(
+                x, attn_mask, k_cache[:, :, :pos], v_cache[:, :, :pos], pos
+            )
             next_token = torch.argmax(logits[:, -1, :], dim=-1)
             if next_token.item() == eod:
                 break
             seq_len = x.shape[1]
-            
+
             pruned_size = k_out.shape[-2]
             k_cache[:, :, pos : pos + seq_len, :pruned_size] = k_out
             v_cache[:, :, pos : pos + seq_len, :pruned_size] = v_out
             pos = pos + seq_len
-            x = torch.nn.functional.embedding(next_token, self.get_input_embeddings(), None, None, 2.0, False, False).unsqueeze(0) * generation_scale
+            x = (
+                torch.nn.functional.embedding(
+                    next_token,
+                    self.get_input_embeddings(),
+                    None,
+                    None,
+                    2.0,
+                    False,
+                    False,
+                ).unsqueeze(0)
+                * generation_scale
+            )
             x = x.reshape(1, 1, hidden_size)
             output_tokens.extend(next_token)
         return output_tokens
-
 
     def get_input_embeddings(self) -> torch.Tensor:
         return self.logits_layer.weight
@@ -583,12 +596,23 @@ class TNLG(nn.Module):
         k_cache: torch.Tensor = None,
         v_cache: torch.Tensor = None,
         pos: int = 0,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if attn_mask is None:
-            max_seq_len, n_layers, n_heads, hidden_size, device = self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device
+            max_seq_len, n_layers, n_heads, hidden_size, device = (
+                self.max_seq_len,
+                self.n_layers,
+                self.n_heads,
+                self.hidden_size,
+                self.device,
+            )
             scale = 10.0
             tokens = x.to(device)
-            x = torch.nn.functional.embedding(tokens, self.get_input_embeddings(), None, None, 2.0, False, False) * scale
+            x = (
+                torch.nn.functional.embedding(
+                    tokens, self.get_input_embeddings(), None, None, 2.0, False, False
+                )
+                * scale
+            )
             if len(x.shape) == 2:
                 x = x.unsqueeze(0)
 
@@ -598,13 +622,16 @@ class TNLG(nn.Module):
 
             head_dim = int(hidden_size / n_heads)
             k_cache = torch.zeros(
-                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)[:, :, :pos]
+                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+            ).to(device)[:, :, :pos]
             v_cache = torch.zeros(
-                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)[:, :, :pos]
-            
+                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+            ).to(device)[:, :, :pos]
+
         x, k_out, v_out = self.transformer(x, attn_mask, k_cache, v_cache, pos)
         self.logits = self.logits_layer(x)
         return self.logits, k_out, v_out
+
 
 class CausalLM(nn.Module):
     def __init__(
@@ -641,42 +668,73 @@ class CausalLM(nn.Module):
             hidden_size, vocab_size, bias=False, device=device
         )
 
-        self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device = seq_len, n_layers, n_heads, hidden_size, device
+        self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device = (
+            seq_len,
+            n_layers,
+            n_heads,
+            hidden_size,
+            device,
+        )
         self.head_dim = int(hidden_size / n_heads)
-        
+
     def generate(self, input_ids, eod, max_length, generation_scale=10.0):
-        max_seq_len, n_layers, n_heads, hidden_size, device = self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device
+        max_seq_len, n_layers, n_heads, hidden_size, device = (
+            self.max_seq_len,
+            self.n_layers,
+            self.n_heads,
+            self.hidden_size,
+            self.device,
+        )
 
         tokens = input_ids.to(device)
-        x = torch.nn.functional.embedding(tokens, self.get_input_embeddings(), None, None, 2.0, False, False).unsqueeze(0) * generation_scale
+        x = (
+            torch.nn.functional.embedding(
+                tokens, self.get_input_embeddings(), None, None, 2.0, False, False
+            ).unsqueeze(0)
+            * generation_scale
+        )
         attn_mask = -10000.0 * torch.triu(
             torch.ones(x.shape[0], max_seq_len, max_seq_len), diagonal=1
         ).to(device)
 
         head_dim = int(hidden_size / n_heads)
         k_cache = torch.zeros(
-            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)
+            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+        ).to(device)
         v_cache = torch.zeros(
-            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)
+            (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+        ).to(device)
 
         pos = 0
         output_tokens = []
         for idx in range(max_length):
-            logits, k_out, v_out = self.forward(x, attn_mask, k_cache[:, :, :pos], v_cache[:, :, :pos], pos)
+            logits, k_out, v_out = self.forward(
+                x, attn_mask, k_cache[:, :, :pos], v_cache[:, :, :pos], pos
+            )
             next_token = torch.argmax(logits[:, -1, :], dim=-1)
             if next_token.item() == eod:
                 break
             seq_len = x.shape[1]
-            
+
             pruned_size = k_out.shape[-2]
             k_cache[:, :, pos : pos + seq_len, :pruned_size] = k_out
             v_cache[:, :, pos : pos + seq_len, :pruned_size] = v_out
             pos = pos + seq_len
-            x = torch.nn.functional.embedding(next_token, self.get_input_embeddings(), None, None, 2.0, False, False).unsqueeze(0) * generation_scale
+            x = (
+                torch.nn.functional.embedding(
+                    next_token,
+                    self.get_input_embeddings(),
+                    None,
+                    None,
+                    2.0,
+                    False,
+                    False,
+                ).unsqueeze(0)
+                * generation_scale
+            )
             x = x.reshape(1, 1, hidden_size)
             output_tokens.extend(next_token)
         return output_tokens
-
 
     def get_input_embeddings(self) -> torch.Tensor:
         return self.logits_layer.weight
@@ -691,12 +749,23 @@ class CausalLM(nn.Module):
         k_cache: torch.Tensor = None,
         v_cache: torch.Tensor = None,
         pos: int = 0,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if attn_mask is None:
-            max_seq_len, n_layers, n_heads, hidden_size, device = self.max_seq_len, self.n_layers, self.n_heads, self.hidden_size, self.device
+            max_seq_len, n_layers, n_heads, hidden_size, device = (
+                self.max_seq_len,
+                self.n_layers,
+                self.n_heads,
+                self.hidden_size,
+                self.device,
+            )
             scale = 10.0
             tokens = x.to(device)
-            x = torch.nn.functional.embedding(tokens, self.get_input_embeddings(), None, None, 2.0, False, False) * scale
+            x = (
+                torch.nn.functional.embedding(
+                    tokens, self.get_input_embeddings(), None, None, 2.0, False, False
+                )
+                * scale
+            )
             if len(x.shape) == 2:
                 x = x.unsqueeze(0)
 
@@ -706,10 +775,12 @@ class CausalLM(nn.Module):
 
             head_dim = int(hidden_size / n_heads)
             k_cache = torch.zeros(
-                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)[:, :, :pos]
+                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+            ).to(device)[:, :, :pos]
             v_cache = torch.zeros(
-                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)).to(device)[:, :, :pos]
-            
+                (x.shape[0], n_layers, max_seq_len, n_heads, head_dim)
+            ).to(device)[:, :, :pos]
+
         x, k_out, v_out = self.transformer(x, attn_mask, k_cache, v_cache, pos)
         self.logits = self.logits_layer(x)
         return self.logits, k_out, v_out

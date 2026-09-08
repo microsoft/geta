@@ -1,4 +1,3 @@
-import os
 import unittest
 
 import torch
@@ -88,7 +87,9 @@ class TestQBert(unittest.TestCase):
         print(f"Compressed MACs for QBert       : {compressed_macs['total']} M MACs")
         print(f"Compressed BOPs for QBert       : {compressed_bops['total']} M BOPs")
         print(f"Compressed num params for QBert : {compressed_num_params} M params")
-        print(f"Compressed weight size for QBert: {compressed_weight_size['total']} M bits")
+        print(
+            f"Compressed weight size for QBert: {compressed_weight_size['total']} M bits"
+        )
 
         print(f"Maximum output difference under the same inputs: {max_output_diff_1}")
         print(f"Maximum output difference under the same inputs: {max_output_diff_2}")

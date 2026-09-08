@@ -3,13 +3,15 @@
 Use tiktoken with tCL100kBaseBPETokenizer to convert text into a sequence of
 vectors.
 """
+
 import abc
 import json
-from logging import getLogger
 import os
-from sentencepiece import SentencePieceProcessor
+from logging import getLogger
+
 import tiktoken
 import torch
+from sentencepiece import SentencePieceProcessor
 
 
 def load_dolly_encodings(file_path) -> tuple[dict, dict]:
@@ -25,9 +27,7 @@ def load_dolly_encodings(file_path) -> tuple[dict, dict]:
     # Find printable (excluding space) characters in extended ascii characters
     # [0, 31], [127, 160] are not printable ascii characters
     uchar_list = [
-        uchar
-        for uchar in range(2**8)
-        if chr(uchar).isprintable() and chr(uchar) != " "
+        uchar for uchar in range(2**8) if chr(uchar).isprintable() and chr(uchar) != " "
     ]
     byte_dict = {chr(uchar): uchar for uchar in uchar_list}
 
@@ -47,28 +47,24 @@ def load_dolly_encodings(file_path) -> tuple[dict, dict]:
         encoding = json.load(json_file)
 
     # Load merge list from json file
-    bpe_merges = \
-        [tuple(merge_str.split()) for merge_str in encoding["model"]["merges"]]
+    bpe_merges = [tuple(merge_str.split()) for merge_str in encoding["model"]["merges"]]
 
     def decode_string(value: str) -> bytes:
         return bytes(byte_dict[uchar] for uchar in value)
 
     # Exclude certain characters
     #           \xc0 \xc1 \xf5 \xf6 \xf7 \xf8 \xf9 \xfa \xfb \xfc \xfd \xfe \xff
-    exclude_list = \
-        [192, 193, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    exclude_list = [192, 193, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
 
     # Build vocabulary dictionary from merge file, then check its consistency
     # with the one stored in json
-    bpe_vocab = \
-        [bytes([uchar]) for uchar in uchar_list if uchar not in exclude_list]
+    bpe_vocab = [bytes([uchar]) for uchar in uchar_list if uchar not in exclude_list]
 
     for first, second in bpe_merges:
         bpe_vocab.append(decode_string(first) + decode_string(second))
 
     # Load vocabulary dictionary
-    vocab_dict = \
-        {decode_string(k): v for k, v in encoding["model"]["vocab"].items()}
+    vocab_dict = {decode_string(k): v for k, v in encoding["model"]["vocab"].items()}
 
     # Drop non-mergeable bpe tokens
     vocab_dict.pop(b"<|endoftext|>", None)
@@ -220,8 +216,7 @@ class TNLGTokenizer(Tokenizer):
         """
         super().__init__(encoding=encoding)
 
-        self.eod_id = \
-            self.tokenizer.encode("<|endoftext|>", allowed_special="all")[0]
+        self.eod_id = self.tokenizer.encode("<|endoftext|>", allowed_special="all")[0]
         self.fim_prefix_id = self.tokenizer.encode(
             "<|fim_prefix|>", allowed_special="all"
         )[0]
@@ -326,8 +321,7 @@ class LLAMATokenizer(Tokenizer):
 
         # Linter does not understand that SentencePieceProcessor redefines
         # __init__.
-        self.tokenizer = \
-            SentencePieceProcessor(model_file=model_path)  # type: ignore
+        self.tokenizer = SentencePieceProcessor(model_file=model_path)  # type: ignore
         self.logger.info(f"Reloaded SentencePiece model from {model_path}")
 
         # BOS / EOS token IDs
@@ -338,14 +332,10 @@ class LLAMATokenizer(Tokenizer):
         self.pad_id: int = self.tokenizer.pad_id()
         self.logger.info(
             "#words: "
-            +
-            f"{self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}"
+            + f"{self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}"
         )
         # Linter does not understand structure of SentencePieceProcessor.
-        assert \
-            self.tokenizer.vocab_size() \
-            == \
-            self.tokenizer.get_piece_size()  # type: ignore
+        assert self.tokenizer.vocab_size() == self.tokenizer.get_piece_size()  # type: ignore
 
     def encode(self, s: str, bos: bool, eos: bool) -> list[int]:
         """Encode string into tokens for LLAMA."""

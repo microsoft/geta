@@ -1,7 +1,7 @@
 import pytest
 import torch
-import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from torchvision.datasets import CIFAR10
 
 from only_train_once import OTO
@@ -120,7 +120,7 @@ def optimizer(model, device, train_loader):
         target_group_sparsity=0.5,
         projection_steps=10,
         start_pruning_step=10,
-        pruning_steps=10 ,
+        pruning_steps=10,
     )
 
 
@@ -159,7 +159,7 @@ def test_optimizer_setup(optimizer):
     assert optimizer.pruning_period_duration == 10
     assert optimizer.projection_steps == 10
     assert optimizer.pruning_steps == 10
-  
+
 
 def test_save_checkpoint(model, optimizer, checkpoint_dir):
     checkpoint = optimizer.create_checkpoint(model, epoch=0, loss=0.0)
@@ -176,7 +176,7 @@ def test_load_checkpoint(model, optimizer, checkpoint_dir, device):
         "model_state_dict": initial_state,
         "optimizer_state_dict": optimizer_state,
         "epoch": 0,
-        "loss": 0.0
+        "loss": 0.0,
     }
     checkpoint_path = checkpoint_dir / f"cifar10_vgg7_bn_{optimizer.num_steps}.pt"
     save_checkpoint(checkpoint_path, checkpoint)
@@ -191,7 +191,6 @@ def test_load_checkpoint(model, optimizer, checkpoint_dir, device):
     assert "optimizer_state_dict" in state_dict
     assert state_dict["optimizer_state_dict"]["param_groups"] is not None
     assert state_dict["optimizer_state_dict"]["num_steps"] == 0
-
 
     # Verify model state
     for key in initial_state.keys():

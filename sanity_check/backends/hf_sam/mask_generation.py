@@ -1,6 +1,6 @@
+import requests
 import torch
 from PIL import Image
-import requests
 from transformers import SamModel, SamProcessor
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -16,6 +16,8 @@ with torch.no_grad():
     outputs = model(**inputs)
 
 masks = processor.image_processor.post_process_masks(
-    outputs.pred_masks.cpu(), inputs["original_sizes"].cpu(), inputs["reshaped_input_sizes"].cpu()
+    outputs.pred_masks.cpu(),
+    inputs["original_sizes"].cpu(),
+    inputs["reshaped_input_sizes"].cpu(),
 )
 scores = outputs.iou_scores

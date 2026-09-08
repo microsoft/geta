@@ -7,60 +7,40 @@ import json
 import logging
 import math
 import os
-import sys
 import warnings
 
-sys.path.append("..")
-sys.path.append(".")
-sys.path.append("/home/xiaoyi/otov2/otov2_auto_structured_pruning/")
-
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms as transforms
+from torch import nn
 
 # from PIL import Image
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
+from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
 # from transformers import AutoImageProcessor
-from utils.utils import check_accuracy
-
 from only_train_once import OTO
+from only_train_once.optimizer.utils import (
+    load_checkpoint,
+    save_checkpoint,
+    scan_checkpoint,
+)
 from only_train_once.quantization.quant_model import model_to_quantize_model
-from sanity_check.backends.vgg7 import vgg7_bn
-from sanity_check.backends.resnet20_cifar10 import resnet56_cifar10
 from sanity_check.backends.simple_vit import simpleViT_cifar10
+from test_scripts.geta_common import (
+    add_common_args,
+    resolve_data_dir,
+    resolve_output_dir,
+)
+from utils.utils import check_accuracy
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
 # Set up logging
 logger = logging.getLogger("new")
-
-
-class StreamingDataset(IterableDataset):
-    def __init__(
-        self, hf_dataset, preprocess_func, length, max_samples_per_epoch=100000
-    ):
-        self.hf_dataset = hf_dataset
-        self.preprocess_func = preprocess_func
-        self.length = length
-        self.max_samples_per_epoch = max_samples_per_epoch
-
-    def __iter__(self):
-        count = 0
-        for example in self.hf_dataset:
-            if self.max_samples_per_epoch and count >= self.max_samples_per_epoch:
-                break
-            yield self.preprocess_func(example)
-            count += 1
-
-    def __len__(self):
-        return self.length
 
 
 def get_quant_param_dict(model):
@@ -113,7 +93,8 @@ def get_bitwidth_dict(param_dict):
     return bit_dict
 
 
-def get_data_loader(dataset: str, batch_size: int, num_workers: int):
+def get_data_loader(dataset: str, batch_size: int, num_workers: int, data_dir=None):
+    data_dir = resolve_data_dir(data_dir)
     if dataset == "cifar10":
         transform_train = transforms.Compose(
             [
@@ -134,10 +115,16 @@ def get_data_loader(dataset: str, batch_size: int, num_workers: int):
             ]
         )
         trainset = CIFAR10(
-            root="cifar10", train=True, download=True, transform=transform_train
+            root=os.path.join(data_dir, "cifar10"),
+            train=True,
+            download=True,
+            transform=transform_train,
         )
         testset = CIFAR10(
-            root="cifar10", train=False, download=True, transform=transform_test
+            root=os.path.join(data_dir, "cifar10"),
+            train=False,
+            download=True,
+            transform=transform_test,
         )
         input_size = (1, 3, 32, 32)
         train_loader = DataLoader(
@@ -209,9 +196,18 @@ def main(config):
     seed = config.seed
 
     assert pruning_start_step == projection_start_step + projection_steps
+    output_dir = resolve_output_dir(
+        config.output_dir, f"{model_name}_{variant}_{sparsity_level}"
+    )
+    data_dir = resolve_data_dir(config.data_dir)
+    checkpoint_dir = os.path.join(output_dir, "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
     # Logging configuration
     logging.basicConfig(
-        filename=f"./{model_name}_{variant}_{sparsity_level}_{pruning_start_step}.txt",
+        filename=os.path.join(
+            output_dir,
+            f"{model_name}_{variant}_{sparsity_level}_{pruning_start_step}.txt",
+        ),
         filemode="a",
         format="%(message)s",
         level=logging.INFO,
@@ -229,7 +225,7 @@ def main(config):
     logger.info(f"Start pruning step: {pruning_start_step:^3d}")
     logger.info(f"Pruning steps: {pruning_steps:^3d}")
     logger.info(f"Learning rate scheduler steps: {lr_step:^3d}")
-    logger.info(f"=======================================")
+    logger.info("=======================================")
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -238,13 +234,13 @@ def main(config):
         torch.cuda.manual_seed(seed)
 
     train_loader, test_loader, input_size = get_data_loader(
-        dataset, batch_size * num_gpus, num_workers
+        dataset, batch_size * num_gpus, num_workers, data_dir
     )
     # num_classes = 10 if dataset == "cifar10" else 1000
     dummy_input = torch.rand(input_size).to(device)
-        
+
     model = simpleViT_cifar10()
-    q_model = model_to_quantize_model(model,init_bit=init_bit)
+    q_model = model_to_quantize_model(model, num_bits=init_bit)
     oto = OTO(q_model.to(device), dummy_input=dummy_input)
     oto.mark_unprunable_by_param_names(["to_patch_embedding.2.weight"])
 
@@ -272,7 +268,6 @@ def main(config):
         # max_bit_act=max_bit_act,
     )
 
-
     # Get full/original floating-point model MACs, BOPs, and number of parameters
     full_macs = oto.compute_macs(in_million=True, layerwise=True)
     full_bops = oto.compute_bops(in_million=True, layerwise=True)
@@ -296,12 +291,82 @@ def main(config):
     best_epoch = 0
     best_acc1 = 0.0
     loss_list = []
+    start_epoch = 0
+    if (
+        os.environ.get("TRAINER_RESUME") == "1"
+        or os.environ.get("SLURM_RESTART_COUNT", "0") != "0"
+    ):
+        ckpt_path = scan_checkpoint(checkpoint_dir, "ckpt_")
+        if ckpt_path is not None:
+            try:
+                logger.info(f"Attempting resume from {ckpt_path}")
+                ckpt = load_checkpoint(ckpt_path, device)
+                model_to_load = model.module if num_gpus > 1 else model
+                model_to_load.load_state_dict(ckpt["model_state_dict"])
+                opt_state = ckpt.get("optimizer_state_dict", {})
+                for key in [
+                    "num_steps",
+                    "curr_pruning_period",
+                    "start_pruning_step",
+                    "pruning_periods",
+                    "pruning_steps",
+                    "start_projection_step",
+                    "projection_periods",
+                    "projection_steps",
+                    "pruning_period_duration",
+                    "projection_period_duration",
+                    "target_num_redundant_groups",
+                    "pruned_group_idxes",
+                    "bit_layers",
+                    "min_bit_wt",
+                    "max_bit_wt",
+                    "min_bit_act",
+                    "max_bit_act",
+                ]:
+                    if key in opt_state:
+                        try:
+                            setattr(optimizer, key, opt_state[key])
+                        except Exception:
+                            pass
+                try:
+                    ckpt_groups = opt_state.get("param_groups", [])
+                    for pg, ckpt_pg in zip(optimizer.param_groups, ckpt_groups):
+                        for k in [
+                            "important_idxes",
+                            "active_redundant_idxes",
+                            "pruned_idxes",
+                            "importance_scores",
+                        ]:
+                            if k in ckpt_pg:
+                                pg[k] = ckpt_pg[k]
+                except Exception as e:
+                    logger.warning(f"Could not restore param_groups: {e}")
+                if (
+                    "scheduler_state_dict" in ckpt
+                    and ckpt["scheduler_state_dict"] is not None
+                ):
+                    try:
+                        lr_scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+                    except Exception as e:
+                        logger.warning(f"Could not load scheduler state: {e}")
+                start_epoch = ckpt["epoch"] + 1
+                best_acc1 = ckpt.get("best_acc1", 0.0)
+                best_epoch = ckpt.get("best_epoch", 0)
+                logger.info(
+                    f"Resumed from epoch {start_epoch} (ckpt epoch {ckpt['epoch']}), best_acc1={best_acc1:.2f}%"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to resume from checkpoint {ckpt_path}: {e}")
+                import traceback
 
-    for epoch in range(epochs):
+                logger.warning(traceback.format_exc())
+                start_epoch = 0
+
+    for epoch in range(start_epoch, epochs):
         model.train()
         running_loss = 0.0
         for batch_idx, batch in enumerate(
-            tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")
+            tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}")
         ):
             if dataset == "imagenet":
                 inputs, targets = batch["pixel_values"], batch["labels"]
@@ -351,7 +416,30 @@ def main(config):
         if accuracy1 > best_acc1:
             best_acc1 = accuracy1
             best_epoch = epoch
-            torch.save(model, "./simpleViT_best_acc1.pt")
+            torch.save(model, os.path.join(output_dir, "simpleViT_best_acc1.pt"))
+        # Save checkpoint for resume (every epoch)
+        try:
+            ckpt = optimizer.create_checkpoint(
+                model.module if num_gpus > 1 else model, epoch, running_loss_avg
+            )
+            ckpt["best_acc1"] = best_acc1
+            ckpt["best_epoch"] = best_epoch
+            try:
+                ckpt["scheduler_state_dict"] = lr_scheduler.state_dict()
+            except:
+                ckpt["scheduler_state_dict"] = None
+            save_checkpoint(os.path.join(checkpoint_dir, f"ckpt_{epoch}.pt"), ckpt)
+            ckpts = sorted(
+                [f for f in os.listdir(checkpoint_dir) if f.startswith("ckpt_")],
+                key=lambda x: int(x.split("_")[-1].split(".")[0]),
+            )
+            for old in ckpts[:-3]:
+                try:
+                    os.remove(os.path.join(checkpoint_dir, old))
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to save checkpoint at epoch {epoch}: {e}")
 
         loss_list.append(running_loss_avg)
 
@@ -359,7 +447,7 @@ def main(config):
     logger.info("Training completed. Constructing subnet...")
 
     # Construct the subnet and get the compressed model
-    oto.construct_subnet(out_dir="./cache")
+    oto.construct_subnet(out_dir=os.path.join(output_dir, "subnet"))
     compressed_model = torch.load(oto.compressed_model_path)
     oto_compressed = OTO(compressed_model, dummy_input)
 
@@ -507,7 +595,7 @@ def get_config():
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
 
     # Parse arguments
-    config = parser.parse_args()
+    config = add_common_args(parser).parse_args()
 
     return config
 

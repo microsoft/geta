@@ -1,17 +1,23 @@
 from abc import ABC, abstractclassmethod
 
 import torch
-import torch.nn as nn
 
 from only_train_once.transform import TensorTransform, index_transformation
 
+
 def is_quant_variable(p_name):
-    if '.t_quant_wt' in p_name or '.t_quant_act' in p_name or \
-       '.d_quant_wt' in p_name or '.d_quant_act' in p_name or \
-       '.q_m_wt' in p_name or '.q_m_act' in p_name:
+    if (
+        ".t_quant_wt" in p_name
+        or ".t_quant_act" in p_name
+        or ".d_quant_wt" in p_name
+        or ".d_quant_act" in p_name
+        or ".q_m_wt" in p_name
+        or ".q_m_act" in p_name
+    ):
         return True
     else:
         return False
+
 
 class BasicOperator(ABC):
     def __init__(self, id=None, _type=None, cfg_params=dict()):
@@ -1129,6 +1135,7 @@ class BertAttentionOTO(BaseMultiHeadAttentionOTO):
                         expand_pruned_idxes.append(h + i * self.head_dim)
                 leaf_op.prune_out_dim(expand_pruned_idxes)
 
+
 class QKVMultiHeadAttentionOTO(BaseMultiHeadAttentionOTO):
     def __init__(self, id=None, _type=None, cfg_params=dict(), module=None):
         super().__init__(id, _type, cfg_params, module)
@@ -1426,7 +1433,6 @@ COMPOSED_MODULES = {
     "PhiMHA": PhiAttentionOTO,
     "SimpleViTAttention": SimpleViTAttentionOTO,
     "ViTAttention": ViTAttentionOTO,
-
     # 'DepConvAttention': DepConvAttentionOTO,
     "LoraLinear": LoraLinearOTO,
     "LoraEmbedding": LoraEmbeddingOTO,

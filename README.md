@@ -40,7 +40,9 @@ import torch
 
 # Create OTO instance
 model = vgg7_bn()
-model = model_to_quantize_model(model, quant_mode=QuantizationMode.WEIGHT_AND_ACTIVATION)
+model = model_to_quantize_model(
+    model, quant_mode=QuantizationMode.WEIGHT_AND_ACTIVATION
+)
 dummy_input = torch.rand(1, 3, 32, 32)
 oto = OTO(model=model.cuda(), dummy_input=dummy_input.cuda())
 
@@ -77,8 +79,8 @@ for epoch in range(max_epoch):
         f.backward()
         optimizer.step()
 
-# A pruned and quantized vgg7 will be generated. 
-oto.construct_subnet(out_dir='./')
+# A pruned and quantized vgg7 will be generated.
+oto.construct_subnet(out_dir="./")
 ```
 
 # Issues

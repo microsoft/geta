@@ -1,8 +1,7 @@
 import logging
 import math
-from typing import Dict, Union
 
-import torch.nn as nn
+from torch import nn
 
 from .quant_layers import LAYER_TO_QUANTLAYER, QuantizationMode, QuantizationType
 
@@ -12,6 +11,7 @@ The model_to_quantize_model supports
     - both linear quantization (no t) and nonlinear quantization (yes t)
 """
 
+
 def model_to_quantize_model(
     model: nn.Module,
     d_quant_init: float = 1e-4,
@@ -19,8 +19,8 @@ def model_to_quantize_model(
     q_m_init: float = 1.0,
     quant_init_by_module: bool = True,
     num_bits: int = 16,
-    quant_type: Union[QuantizationType, str] = QuantizationType.SYMMETRIC_NONLINEAR,
-    quant_mode: Union[QuantizationMode, str] = QuantizationMode.WEIGHT_ONLY,
+    quant_type: QuantizationType | str = QuantizationType.SYMMETRIC_NONLINEAR,
+    quant_mode: QuantizationMode | str = QuantizationMode.WEIGHT_ONLY,
 ) -> nn.Module:
     """Convert model layers to quantized versions.
 
@@ -82,7 +82,7 @@ def model_to_quantize_model(
     return model
 
 
-def get_quant_param_dict(model: nn.Module) -> Dict[str, Dict[str, float]]:
+def get_quant_param_dict(model: nn.Module) -> dict[str, dict[str, float]]:
     """Extract quantization parameters from a model.
 
     Args:
@@ -102,8 +102,8 @@ def get_quant_param_dict(model: nn.Module) -> Dict[str, Dict[str, float]]:
 
 
 def get_bitwidth_dict(
-    param_dict: Dict[str, Dict[str, float]],
-) -> Dict[str, Dict[str, float]]:
+    param_dict: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
     """Calculate bitwidths for weights and activations of each layer.
 
     Args:
@@ -112,7 +112,7 @@ def get_bitwidth_dict(
     Returns:
         Dictionary mapping layer names to their calculated bitwidths for weights and activations
     """
-    bit_dict: Dict[str, Dict[str, float]] = {}
+    bit_dict: dict[str, dict[str, float]] = {}
 
     def _calculate_bitwidth(d_quant: float, q_m: float, t_quant: float = 1.0) -> float:
         return math.log2(math.exp(t_quant * math.log(abs(q_m))) / abs(d_quant) + 1) + 1

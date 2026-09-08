@@ -40,6 +40,6 @@
 # from .mamba import MambaLM, MambaLMConfig
 
 # sanity check for quantized model
-from .resnet_cifar10 import resnet18_cifar10, resnet50_cifar10
-from .resnet20_cifar10 import resnet20_cifar10
 from .carn.carn import CarnNet
+from .resnet20_cifar10 import resnet20_cifar10
+from .resnet_cifar10 import resnet18_cifar10, resnet50_cifar10

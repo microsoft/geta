@@ -3,22 +3,20 @@ import glob
 import os
 import random
 import subprocess
-import sys
 import zipfile
 
 import cv2
 import h5py
 import numpy as np
 import torch
-import torch.utils.data as data
-import torchvision.transforms as transforms
 from PIL import Image
 from skimage.color import rgb2ycbcr
 from skimage.metrics import peak_signal_noise_ratio
+from torch.utils import data
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from tqdm import tqdm
 
-sys.path.append("..")
 from only_train_once import OTO
 from only_train_once.quantization.quant_model import model_to_quantize_model
 from sanity_check.backends import CarnNet
@@ -56,12 +54,12 @@ def psnr(im1, im2):
 
 class TrainDataset(data.Dataset):
     def __init__(self, path, size, scale):
-        super(TrainDataset, self).__init__()
+        super().__init__()
         self.size = size
         h5f = h5py.File(path, "r")
         self.hr = [v[:] for v in h5f["HR"].values()]
         self.scale = [scale] if scale != 0 else [2, 3, 4]
-        self.lr = [[v[:] for v in h5f["X{}".format(s)].values()] for s in self.scale]
+        self.lr = [[v[:] for v in h5f[f"X{s}"].values()] for s in self.scale]
         h5f.close()
         self.transform = transforms.Compose([transforms.ToTensor()])
 
@@ -80,17 +78,17 @@ class TrainDataset(data.Dataset):
 
 class TestDataset(data.Dataset):
     def __init__(self, dirname, scale):
-        super(TestDataset, self).__init__()
+        super().__init__()
         self.name = dirname.split("/")[-1]
         print(f"Test set name is {self.name}")
         self.scale = scale
         if "DIV" in self.name:
-            self.hr = glob.glob(os.path.join("{}_HR".format(dirname), "*.png"))
+            self.hr = glob.glob(os.path.join(f"{dirname}_HR", "*.png"))
             self.lr = glob.glob(
-                os.path.join("{}_LR_bicubic".format(dirname), "X{}/*.png".format(scale))
+                os.path.join(f"{dirname}_LR_bicubic", f"X{scale}/*.png")
             )
         else:
-            all_files = glob.glob(os.path.join(dirname, "x{}/*.png".format(scale)))
+            all_files = glob.glob(os.path.join(dirname, f"x{scale}/*.png"))
             self.hr = [name for name in all_files if "HR" in name]
             self.lr = [name for name in all_files if "LR" in name]
         self.hr.sort()
@@ -217,7 +215,7 @@ def train_carn():
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(
         log_dir,
-        f'logs_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.txt',
+        f"logs_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
     )
 
     scale = 2
@@ -273,9 +271,9 @@ def train_carn():
             try:
                 loss.backward()
             except RuntimeError as e:
-                print(f"Error during backward pass: {str(e)}")
+                print(f"Error during backward pass: {e!s}")
                 with open(log_file, "a") as f:
-                    f.write(f"Error during backward pass: {str(e)}\n")
+                    f.write(f"Error during backward pass: {e!s}\n")
                 print("Continuing to next step...")
                 continue
             optimizer.grad_clipping()
@@ -284,7 +282,7 @@ def train_carn():
             optimizer.set_learning_rate(learning_rate)
             f_avg_val += loss.item()
             if step % print_interval == 0:
-                print(f"Step: {step}, loss: {f_avg_val/print_interval:.4f}")
+                print(f"Step: {step}, loss: {f_avg_val / print_interval:.4f}")
                 metrics = optimizer.compute_metrics()
                 print(metrics)
                 f_avg_val = 0.0

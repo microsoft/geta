@@ -1,14 +1,10 @@
-from abc import ABC, abstractclassmethod
-
 import numpy as np
 import torch
-from torch.optim.optimizer import Optimizer, required
+from torch.optim.optimizer import required
 
 from only_train_once.transform import (
     TensorTransform,
-    index_transformation,
     index_transformation_param_group,
-    tensor_transformation,
     tensor_transformation_param_group,
 )
 
@@ -37,19 +33,7 @@ class SparseOptimizerMetrics:
     group_sparsity = 0.0
 
     def __repr__(self) -> str:
-        return "num_zero_grps: {num_zero_group}, gs: {group_sparsity:.2f}, norm_params: {norm_params:.2f}, norm_import: {norm_import:.2f}, norm_violating: {norm_violating:.2f}, norm_redund: {norm_redund:.2f}, num_grps_import: {num_grps_import}, num_grps_redund: {num_grps_redund}, num_grps_violating: {num_grps_violating}, num_grps_trial_violating: {num_grps_trial_violating}, num_grps_hist_violating: {num_grps_historical_violating}".format(
-            num_zero_group=self.num_zero_groups,
-            group_sparsity=self.group_sparsity,
-            norm_params=self.norm_params,
-            norm_import=self.norm_important_groups,
-            norm_violating=self.norm_violating_groups,
-            norm_redund=self.norm_redundant_groups,
-            num_grps_import=self.num_important_groups,
-            num_grps_redund=self.num_redundant_groups,
-            num_grps_violating=self.num_violating_groups,
-            num_grps_trial_violating=self.num_trial_violating_groups,
-            num_grps_historical_violating=self.num_historical_violating_groups,
-        )
+        return f"num_zero_grps: {self.num_zero_groups}, gs: {self.group_sparsity:.2f}, norm_params: {self.norm_params:.2f}, norm_import: {self.norm_important_groups:.2f}, norm_violating: {self.norm_violating_groups:.2f}, norm_redund: {self.norm_redundant_groups:.2f}, num_grps_import: {self.num_important_groups}, num_grps_redund: {self.num_redundant_groups}, num_grps_violating: {self.num_violating_groups}, num_grps_trial_violating: {self.num_trial_violating_groups}, num_grps_hist_violating: {self.num_historical_violating_groups}"
 
 
 class BaseHybridSparseOptimizer(BaseOptimizer):
@@ -67,12 +51,10 @@ class BaseHybridSparseOptimizer(BaseOptimizer):
         additional_defaults=dict(),
     ):
         if lr is not required and lr < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if variant not in SUPPORT_GRADIENT_ESTIMATES:
             raise ValueError(
-                "Need to select a gradient estimation from {}".format(
-                    SUPPORT_GRADIENT_ESTIMATES
-                )
+                f"Need to select a gradient estimation from {SUPPORT_GRADIENT_ESTIMATES}"
             )
 
         # Set up hyper-parameters related to baseline optimizer
@@ -110,7 +92,7 @@ class BaseHybridSparseOptimizer(BaseOptimizer):
         )
         defaults.update(additional_defaults)
 
-        super(BaseHybridSparseOptimizer, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         # Set up total number of prunable groups
         self.total_num_groups = 0
@@ -248,7 +230,7 @@ class BaseHybridSparseOptimizer(BaseOptimizer):
             for param, p_transform in zip(group["params"], group["p_transform"]):
                 if p_transform == TensorTransform.NO_PRUNE:
                     continue
-                '''
+                """
                 param_transform = None
                 if p_transform == TensorTransform.MULTIHEAD_HEADDIM:
                     param_transform = tensor_transformation(param.data, p_transform, group['num_groups'], group['num_heads'])
@@ -264,8 +246,10 @@ class BaseHybridSparseOptimizer(BaseOptimizer):
                             param_transform = tensor_transformation(param_transform, p_transform_type, num_heads)
                 else:
                     param_transform = tensor_transformation(param.data, p_transform, group['num_groups'])
-                '''
-                param_transform = tensor_transformation_param_group(param.data, p_transform, group)
+                """
+                param_transform = tensor_transformation_param_group(
+                    param.data, p_transform, group
+                )
                 if norm_group == None:
                     norm_group = torch.norm(param_transform, dim=1) ** 2
                 else:

@@ -1,18 +1,25 @@
-import torch.nn as nn
 import torch
+from torch import nn
+
 
 class DemoNetConcatCase1(nn.Module):
     def __init__(self):
-        super(DemoNetConcatCase1, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
         self.bn_1 = nn.BatchNorm2d(64)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        self.conv2 = nn.Conv2d(
+            64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+        )
+        self.conv3 = nn.Conv2d(
+            64, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+        )
         self.bn_2 = nn.BatchNorm2d(128)
         self.bn_3 = nn.BatchNorm2d(128)
         self.bn_4 = nn.BatchNorm2d(192)
         self.relu = nn.ReLU(inplace=True)
-        self.conv5 = nn.Conv2d(192, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        self.conv5 = nn.Conv2d(
+            192, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+        )
         self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         self.gemm1 = nn.Linear(in_features=256, out_features=128, bias=True)
         self.gemm2 = nn.Linear(in_features=128, out_features=10, bias=True)

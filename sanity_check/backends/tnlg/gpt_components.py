@@ -5,9 +5,8 @@ This module contains the individual components of the Transformer model.
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as f
-from typing import Union, Tuple
+from torch import nn
 
 
 class RMSNorm(torch.nn.Module):
@@ -55,7 +54,7 @@ def rotary_mat(
     head_scale=1.0,
     device=torch.device("cuda"),
     dtype=torch.float32,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Calculate the rotary matrices for the sequence.
 
     Args:
@@ -138,8 +137,8 @@ class RotaryEmbedding(torch.nn.Module):
         cos_x = cos[:, pos : pos + seq_len, :, :]
         sin_x = sin[:, pos : pos + seq_len, :, :]
 
-        real = cos_x[..., :x1.shape[-1]] * x1 - sin_x[..., :x2.shape[-1]] * x2
-        imag = sin_x[..., :x1.shape[-1]] * x1 + cos_x[..., :x2.shape[-1]] * x2
+        real = cos_x[..., : x1.shape[-1]] * x1 - sin_x[..., : x2.shape[-1]] * x2
+        imag = sin_x[..., : x1.shape[-1]] * x1 + cos_x[..., : x2.shape[-1]] * x2
 
         if interleaved:
             x_rot[:, :, :, 0::2] = real
@@ -158,7 +157,7 @@ class SelfAttention(nn.Module):
         hidden_size: int,
         n_heads: int,
         scale_type: str,
-        device: Union[torch.device, None] = None,
+        device: torch.device | None = None,
         use_biases: bool = True,
         interleaved: bool = False,
     ) -> None:
@@ -202,7 +201,7 @@ class SelfAttention(nn.Module):
             raise ValueError(f"Unknown scale type {scale_type}")
 
         self.interleaved = interleaved
-        
+
     def forward(
         self,
         x: torch.Tensor,
@@ -213,7 +212,7 @@ class SelfAttention(nn.Module):
         v_cache: torch.Tensor,
         pos: int,
         layer_id: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass of the Self-Attention module.
 
         Args:
@@ -296,9 +295,7 @@ class SelfAttention(nn.Module):
 class ProjLayer(nn.Module):
     """The projection layer."""
 
-    def __init__(
-        self, hidden_size: int, device: Union[torch.device, None] = None
-    ) -> None:
+    def __init__(self, hidden_size: int, device: torch.device | None = None) -> None:
         """Create a new instance of ProjLayer.
 
         Creates a new instance of ProjLayer with the given hidden size and at a
@@ -337,7 +334,7 @@ class ProjLayerSiluMatMul(nn.Module):
         self,
         in_feature_size: int,
         hidden_feature_size: int,
-        device: Union[torch.device, None] = None,
+        device: torch.device | None = None,
     ) -> None:
         """Create a new instance of ProjLayerSiluMatMul."""
         super().__init__()

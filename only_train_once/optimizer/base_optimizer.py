@@ -1,19 +1,17 @@
-from abc import abstractclassmethod
-
 import torch
-from torch.optim.optimizer import Optimizer, required
+from torch.optim.optimizer import Optimizer
 
 
 class BaseOptimizer(Optimizer):
     def __init__(self, params, defaults=dict(), **kwargs):
-        super(BaseOptimizer, self).__init__(params, defaults)
+        super().__init__(params, defaults)
         self.num_steps = 0
         self.safe_guard = 1e-8
         self.first_moment_grads = dict()
         self.second_moment_grads = dict()
 
     def __setstate__(self, state):
-        super(BaseOptimizer, self).__setstate__(state)
+        super().__setstate__(state)
 
     def get_first_momentum_grad(self, name, first_moment, dampening, grad):
         if first_moment > 0:

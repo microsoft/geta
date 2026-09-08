@@ -1,4 +1,4 @@
-'''
+"""
 - Implementation of resnet20 architecture
 - Create a quantized resnet20 instance:
     model = ResNet20(BasicBlock, [3, 3, 3])
@@ -9,12 +9,13 @@ Reference:
 [2] https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
 [3] https://github.com/akamaster/pytorch_resnet_cifar10/blob/master/resnet.py
 
-'''
+"""
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init # for weight initialization.
+from torch import nn
+from torch.nn import init  # for weight initialization.
+
 
 def _weights_init(m):
     if isinstance(m, nn.Linear):
@@ -23,22 +24,38 @@ def _weights_init(m):
     if isinstance(m, nn.Conv2d):
         init.kaiming_normal_(m.weight)
 
+
 class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, in_channels, out_channels, stride=1):
-        super(BasicBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        super().__init__()
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            bias=False,
+        )
         self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
         self.bn2 = nn.BatchNorm2d(out_channels)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                     nn.Conv2d(in_channels, self.expansion * out_channels, kernel_size=1, stride=stride, bias=False),
-                     nn.BatchNorm2d(self.expansion * out_channels)
-                )
+                nn.Conv2d(
+                    in_channels,
+                    self.expansion * out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(self.expansion * out_channels),
+            )
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
@@ -50,7 +67,7 @@ class BasicBlock(nn.Module):
 
 class ResNet20(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
-        super(ResNet20, self).__init__()
+        super().__init__()
         self.in_channels = 16
 
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
@@ -60,11 +77,11 @@ class ResNet20(nn.Module):
         self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
         self.linear = nn.Linear(64, num_classes)
 
-        self.avg_pool2d = nn.AvgPool2d(kernel_size=(8,8), stride=(8,8))
+        self.avg_pool2d = nn.AvgPool2d(kernel_size=(8, 8), stride=(8, 8))
         self.apply(_weights_init)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
-        strides = [stride] + [1]*(num_blocks-1)
+        strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
             layers.append(block(self.in_channels, out_channels, stride))
@@ -82,10 +99,11 @@ class ResNet20(nn.Module):
         out = self.linear(out)
         return out
 
+
 def resnet20_cifar10():
-    """ return a ResNet 20 object
-    """
+    """return a ResNet 20 object"""
     return ResNet20(BasicBlock, [3, 3, 3])
+
 
 def resnet56_cifar10():
     return ResNet20(BasicBlock, [9, 9, 9])

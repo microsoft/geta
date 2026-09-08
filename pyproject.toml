@@ -1,0 +1,37 @@
+[project]
+authors = [{name = "Xiaoyi Qu", email = "xiq322@lehigh.edu"}, {name = "Tianyi Chen", email = "Tianyi.Chen@microsoft.com"}]
+dependencies = [
+    "datasets>=2.19.2,<3",
+    "einops>=0.8.1,<0.9",
+    "graphviz>=0.21",
+    "h5py>=3.9.0,<4",
+    "matplotlib>=3.5.0",
+    "numpy<2",
+    "onnx>=1.22.0",
+    "onnxruntime>=1.23.2",
+    "opencv-python>=4.11.0.86",
+    "scikit-image>=0.19.0",
+    "timm>=1.0.19,<2",
+    "torch==2.2.0",
+    "torchvision>=0.15.0,<0.20.0",
+    "tqdm>=4.67.1,<5",
+    "transformers>=4.33.3,<5",
+    "typer>=0.16.1,<0.17",
+    "ultralytics>=8.4.143",
+]
+name = "geta"
+requires-python = "==3.10.*"
+version = "0.1.0"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["tutorials", "test_scripts", "sanity_check", "only_train_once", "utils"]
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.6",
+]

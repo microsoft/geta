@@ -1,16 +1,19 @@
 # https://github.com/kentaroy47/vision-transformers-cifar10/tree/main
 
-import torch
-import torch.nn as nn
-from only_train_once import OTO
-import unittest
 import os
-from backends.hf_vit.modeling_vit import ViTForImageClassification
-from backends.vision_transformer.vision_transformer import vit_base_patch16_384, vit_small_patch16_224
+import unittest
+
+import torch
+from backends.vision_transformer.vision_transformer import (
+    vit_small_patch16_224,
+)
+from torch import nn
+
+from only_train_once import OTO
 from only_train_once.quantization.quant_model import model_to_quantize_model
 
+OUT_DIR = "./cache"
 
-OUT_DIR = './cache'
 
 class TestQViT(unittest.TestCase):
     def test_sanity(self, dummy_input=torch.rand(1, 3, 224, 224)):
@@ -20,23 +23,20 @@ class TestQViT(unittest.TestCase):
         q_model = model_to_quantize_model(model)
 
         oto = OTO(q_model, dummy_input=dummy_input)
-        
-        oto.mark_unprunable_by_param_names(
-            ['patch_embed.proj.weight',
-             'pos_embed']
-        )
+
+        oto.mark_unprunable_by_param_names(["patch_embed.proj.weight", "pos_embed"])
 
         oto.visualize(view=False, out_dir=OUT_DIR, display_params=True)
-    
+
         oto.random_set_zero_groups(target_group_sparsity=0.8)
 
         oto.construct_subnet(
             export_huggingface_format=False,
             export_float16=False,
             full_group_sparse_model_dir=OUT_DIR,
-            compressed_model_dir=OUT_DIR
+            compressed_model_dir=OUT_DIR,
         )
-        
+
         full_model = torch.load(oto.full_group_sparse_model_path)
         compressed_model = torch.load(oto.compressed_model_path)
 
@@ -48,10 +48,14 @@ class TestQViT(unittest.TestCase):
         self.assertLessEqual(max_output_diff, 1e-4)
         full_model_size = os.stat(oto.full_group_sparse_model_path)
         compressed_model_size = os.stat(oto.compressed_model_path)
-        print("Size of full model     : ", full_model_size.st_size / (1024 ** 3), "GBs")
-        print("Size of compress model : ", compressed_model_size.st_size / (1024 ** 3), "GBs")
+        print("Size of full model     : ", full_model_size.st_size / (1024**3), "GBs")
+        print(
+            "Size of compress model : ",
+            compressed_model_size.st_size / (1024**3),
+            "GBs",
+        )
 
-        # # For test FLOP and param reductions. 
+        # # For test FLOP and param reductions.
         # oto_compressed = OTO(compressed_model, dummy_input)
         # compressed_flops = oto_compressed.compute_flops(in_million=True)['total']
         # compressed_num_params = oto_compressed.compute_num_params(in_million=True)

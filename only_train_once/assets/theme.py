@@ -7,6 +7,6 @@ THEMES = {
         "font_name": "Times",
         "font_size": "10",
         "margin": "0,0",
-        "padding":  "1.0,0.5",
+        "padding": "1.0,0.5",
     },
 }

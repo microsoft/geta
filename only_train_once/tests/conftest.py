@@ -1,4 +1,5 @@
 """Shared fixtures for tests."""
+
 import torch
 
 

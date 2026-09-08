@@ -1,13 +1,13 @@
+import os
+import unittest
+
 import torch
+from backends import MambaLM, MambaLMConfig
+
 from only_train_once import OTO
 
-import torch
-from backends import mamba_from_pretrained, MambaLM, MambaLMConfig
+OUT_DIR = "./cache"
 
-import unittest
-import os
-
-OUT_DIR = './cache'
 
 class TestMamba(unittest.TestCase):
     def test_sanity(self):
@@ -30,9 +30,9 @@ class TestMamba(unittest.TestCase):
         oto = OTO(model, dummy_input, strict_out_nodes=False)
         oto.visualize(view=False, out_dir=OUT_DIR, display_params=True)
 
-        return 
-        # For test FLOP and param reductions. 
-        full_flops = oto.compute_flops(in_million=True)['total']
+        return
+        # For test FLOP and param reductions.
+        full_flops = oto.compute_flops(in_million=True)["total"]
         full_num_params = oto.compute_num_params(in_million=True)
 
         oto.random_set_zero_groups()
@@ -48,13 +48,19 @@ class TestMamba(unittest.TestCase):
         self.assertLessEqual(max_output_diff, 1e-4)
         full_model_size = os.stat(oto.full_group_sparse_model_path)
         compressed_model_size = os.stat(oto.compressed_model_path)
-        print("Size of full model     : ", full_model_size.st_size / (1024 ** 3), "GBs")
-        print("Size of compress model : ", compressed_model_size.st_size / (1024 ** 3), "GBs")
+        print("Size of full model     : ", full_model_size.st_size / (1024**3), "GBs")
+        print(
+            "Size of compress model : ",
+            compressed_model_size.st_size / (1024**3),
+            "GBs",
+        )
 
-        # For test FLOP and param reductions. 
+        # For test FLOP and param reductions.
         oto_compressed = OTO(compressed_model, dummy_input)
-        compressed_flops = oto_compressed.compute_flops(in_million=True)['total']
+        compressed_flops = oto_compressed.compute_flops(in_million=True)["total"]
         compressed_num_params = oto_compressed.compute_num_params(in_million=True)
 
         print("FLOP  reduction (%)    : ", 1.0 - compressed_flops / full_flops)
-        print("Param reduction (%)    : ", 1.0 - compressed_num_params / full_num_params)
+        print(
+            "Param reduction (%)    : ", 1.0 - compressed_num_params / full_num_params
+        )

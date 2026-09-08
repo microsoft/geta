@@ -1,16 +1,19 @@
-import torch
-from only_train_once import OTO
-from backends import DemoNetConvtransposeInCase1
-import unittest
 import os
+import unittest
 
-OUT_DIR = './cache'
+import torch
+from backends import DemoNetConvtransposeInCase1
+
+from only_train_once import OTO
+
+OUT_DIR = "./cache"
+
 
 class TestConvTransposeInCase1(unittest.TestCase):
     def test_sanity(self, dummy_input=torch.rand(1, 3, 32, 32)):
         model = DemoNetConvtransposeInCase1()
         oto = OTO(model, dummy_input)
-        
+
         oto.visualize(view=False, out_dir=OUT_DIR)
 
         oto.random_set_zero_groups()
@@ -26,6 +29,10 @@ class TestConvTransposeInCase1(unittest.TestCase):
         print("Maximum output difference " + str(max_output_diff.item()))
         full_model_size = os.stat(oto.full_group_sparse_model_path)
         compressed_model_size = os.stat(oto.compressed_model_path)
-        print("Size of full model     : ", full_model_size.st_size / (1024 ** 3), "GBs")
-        print("Size of compress model : ", compressed_model_size.st_size / (1024 ** 3), "GBs")
+        print("Size of full model     : ", full_model_size.st_size / (1024**3), "GBs")
+        print(
+            "Size of compress model : ",
+            compressed_model_size.st_size / (1024**3),
+            "GBs",
+        )
         self.assertLessEqual(max_output_diff, 3.0)
